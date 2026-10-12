@@ -1,0 +1,41 @@
+[MQTT Nav] starting broker=192.168.3.43:1883; prediction=v1/11/prediction/result; GNSS=v1/11/sensor/gnss/gnss_01
+[Pipeline] 主循环首帧 frame_idx=1 AI=(360, 640, 3) Godot=(360, 640, 4)
+[ShmVideoSender] send() 首帧 shape=(360, 640, 4) dtype=uint8 contiguous=True
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav] subscribed v1/11/prediction/result and v1/11/sensor/gnss/gnss_01
+[10/12/2026-14:01:50] [TRT] [I] The logger passed into createInferRuntime differs from one already provided for an existing builder, runtime, or refitter. Uses of the global logger, returned by nvinfer1::getLogger(), will return the existing value.
+[10/12/2026-14:01:50] [TRT] [I] Loaded engine size: 12 MiB
+[10/12/2026-14:01:50] [TRT] [W] Using an engine plan file across different models of devices is not recommended and is likely to affect performance or even cause errors.
+[MQTT Nav][ts-dbg] envelope_ts=1791784910.611 sample_ts=None
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=0 pts, trajectoryLength_m=299.0000062488178, collisionAlert=0, dcpaResults=0, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (0 pts):
+[MQTT Nav] ignored v1/11/prediction/result: Prediction result needs a non-empty path array
+[10/12/2026-14:01:50] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +1, GPU +41, now: CPU 2, GPU 101 (MiB)
+[ShmVideoSender] 已写 100 帧 (mmap+semaphore)
+  帧   100/0 | avg 39.5ms (25.3fps) | gst解码 26.3ms | ships=0
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=0 pts, trajectoryLength_m=299.0000007039046, collisionAlert=0, dcpaResults=0, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (0 pts):
+[MQTT Nav] ignored v1/11/prediction/result: Prediction result needs a non-empty path array
+[NvJpeg] 已编码 200 帧
+[Reader] 已推送 200 帧 (丢弃 9, 编码失败 0)
+[ShmVideoSender] 已写 200 帧 (mmap+semaphore)
+  帧   200/0 | avg 40.0ms (25.0fps) | gst解码 26.9ms | ships=0
+[MQTT Nav] received GNSS=100 latest_ts=1791784920.512
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav][ts-dbg] envelope_ts=1791784920.612 sample_ts=None
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=0 pts, trajectoryLength_m=298.9998624291028, collisionAlert=0, dcpaResults=0, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (0 pts):
+[MQTT Nav] ignored v1/11/prediction/result: Prediction result needs a non-empty path array
+[ShmVideoSender] 已写 300 帧 (mmap+semaphore)
+  帧   300/0 | avg 40.0ms (25.0fps) | gst解码 30.8ms | ships=0
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=0 pts, trajectoryLength_m=298.9998971167433, collisionAlert=0, dcpaResults=0, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (0 pts):
+[MQTT Nav] ignored v1/11/prediction/result: Prediction result needs a non-empty path array
+[ShmVideoSender] 已写 400 帧 (mmap+semaphore)
+  帧   400/0 | avg 40.0ms (25.0fps) | gst解码 25.8ms | ships=0
+[NvJpeg] 已编码 400 帧
+[Reader] 已推送 400 帧 (丢弃 10, 编码失败 0)
+Segmentation fault (core dumped)
+
