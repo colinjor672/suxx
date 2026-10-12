@@ -1,0 +1,7 @@
+[configuration]
+entry_symbol = "shm_video_init"
+compatibility_minimum = "4.2"
+
+[libraries]
+linux.arm64 = "res://gdextension/bin/libshm_video.linux.arm64.so"
+linux.x86_64 = "res://gdextension/bin/libshm_video.linux.x86_64.so"

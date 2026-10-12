@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""
+SConstruct — 构建 ShmVideo GDExtension (ShmSync + FrameCapture)
+
+用法:
+  # 先克隆 godot-cpp（只需一次）
+  cd ~/ && git clone -b 4.3 https://github.com/godotengine/godot-cpp.git
+
+  # 编译 godot-cpp
+  cd ~/godot-cpp && scons platform=linux arch=arm64 target=template_release
+
+  # 编译 GDExtension
+  cd gdextension/
+  scons platform=linux arch=arm64    # Jetson Orin Nano (aarch64)
+  scons platform=linux arch=x86_64   # PC 测试
+
+输出: bin/libshm_video.linux.{arch}.so
+"""
+
+import os
+import sys
+
+env = Environment()
+
+# ── 参数 ──
+platform = ARGUMENTS.get("platform", "linux")
+arch     = ARGUMENTS.get("arch", "arm64" if os.uname().machine == "aarch64" else "x86_64")
+target   = ARGUMENTS.get("target", "template_debug")
+
+# ── godot-cpp 路径（可环境变量覆盖） ──
+godot_cpp_dir = os.environ.get("GODOT_CPP_DIR", os.path.expanduser("~/godot-cpp"))
+if not os.path.isdir(godot_cpp_dir):
+    print(f"ERROR: godot-cpp 未找到: {godot_cpp_dir}")
+    print("请先克隆: git clone -b 4.3 https://github.com/godotengine/godot-cpp.git ~/godot-cpp")
+    Exit(1)
+
+# ── 编译器标志 ──
+env.Append(CPPPATH=[
+    "src/",
+    f"{godot_cpp_dir}/gen/include/",
+    f"{godot_cpp_dir}/gdextension/",
+    f"{godot_cpp_dir}/include/",
+])
+
+env.Append(CPPFLAGS=[
+    "-std=c++17",
+    "-fPIC",
+])
+
+if target == "template_release":
+    env.Append(CPPFLAGS=["-O3", "-DNDEBUG"])
+else:
+    env.Append(CPPFLAGS=["-O2", "-g"])
+
+# ── 平台特定 ──
+if platform == "linux":
+    if arch == "arm64":
+        env.Append(CPPFLAGS=["-march=armv8-a"])
+        env.Append(LINKFLAGS=["-march=armv8-a"])
+
+    # POSIX 共享内存和信号量在 libc/libpthread 中，无需额外链接
+    # mmap, shm_open, sem_open 等都在系统库中
+    env.Append(LIBS=["rt", "pthread"])
+
+# ── 源文件 ──
+sources = Glob("src/*.cpp")
+
+# ── 输出 ──
+lib_name = f"libshm_video.{platform}.{arch}.so"
+env.Append(LINKFLAGS=["-shared"])
+
+# 链接 godot-cpp 静态库
+godot_cpp_lib_name = f"godot-cpp.{platform}.{target}.{arch}"
+godot_cpp_lib = f"{godot_cpp_dir}/bin/lib{godot_cpp_lib_name}.a"
+if not os.path.isfile(godot_cpp_lib):
+    print(f"ERROR: godot-cpp 未编译: {godot_cpp_lib}")
+    print(f"请先编译 godot-cpp: cd {godot_cpp_dir} && scons platform={platform} arch={arch} target={target}")
+    Exit(1)
+
+env.Append(LIBS=[godot_cpp_lib_name])
+env.Append(LIBPATH=[f"{godot_cpp_dir}/bin/"])
+
+# ── 输出到 gdextension/bin/ ──
+output_dir = os.path.join(os.path.dirname(os.path.abspath(".")), "gdextension", "bin")
+os.makedirs(output_dir, exist_ok=True)
+
+# ── 构建 ──
+env.SharedLibrary(
+    target=os.path.join(output_dir, lib_name),
+    source=sources,
+)
+
+print(f"\n✓ 构建成功: {output_dir}/{lib_name}")
+print(f"  Godot 项目已配置加载此扩展 (shm_video.gdextension)")

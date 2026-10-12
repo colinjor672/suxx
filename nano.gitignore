@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Godot
+.godot/
+*.pck
+*.arm64
+export_presets.cfg
+export_credentials.cfg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 视频/大文件
+*.mp4
+*.mov
+*.MOV
+
+# 数据文件
+*.xlsx
+*.jsonl
+
+# 图片输出
+*_2d.png
+*_diag.png
+*.jpg
+
+# 系统文件
+.DS_Store
+Thumbs.db

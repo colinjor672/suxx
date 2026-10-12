@@ -1,0 +1,6 @@
+{
+  "nav_host": "127.0.0.1",
+  "nav_port": 8765,
+  "video_host": "127.0.0.1",
+  "video_port": 8766
+}

@@ -1,0 +1,12 @@
+*.mp4
+*.arm64
+*.MOV
+*.log
+*.txt
+*.zip
+*.tar
+*.gz
+*.rar
+__pycache__/
+venv/
+*.pyc
