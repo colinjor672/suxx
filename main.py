@@ -20,13 +20,13 @@ import cv2
 from env_setup import setup_environment, setup_onnxruntime_cuda
 from config import SHIP_ENGINE_PATH
 from video_pipeline import process_video
-from godot_launcher import start_godot, stop_godot
+from godot_launcher import start_godot, stop_godot, push_is_alive, restart_push
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Navigation")
     #cap = cv2.VideoCapture(input_video)  # input_video 是 "video.mp4" 文件
-    p.add_argument("--input", default="rtsp://admin:gzsia2011@192.168.3.43:554/Streaming/Channels/101")#rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101
+    p.add_argument("--input", default="rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101")#rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101
     p.add_argument("--output", default="output_nav.mp4")
     p.add_argument("--seg",    default="best_fp16.engine")
     p.add_argument("--device", default="cuda")
@@ -67,9 +67,9 @@ def parse_args():
                    help="LiDAR 距水面高度，米")
     p.add_argument("--nav-heading-offset", type=float, default=0.0,
                    help="航向安装修正角，度")
-    p.add_argument("--mqtt-host", default="192.168.3.43",
+    p.add_argument("--mqtt-host", default="127.0.0.1",
                    help="本地 MQTT Broker 地址")
-    p.add_argument("--mqtt-port", type=int, default=1883,
+    p.add_argument("--mqtt-port", type=int, default=1890,
                    help="本地 MQTT Broker 端口")
     p.add_argument("--prediction-topic", default="v1/11/prediction/result",
                    help="避障服务路径结果 MQTT Topic")
@@ -88,13 +88,13 @@ def parse_args():
 
     p.add_argument("--ship-id", type=int, default=11,
                    help="本船在平台的船舶ID（Redis 键 bridge_alert:{船id}:{桥id}:{级别}）")
-    p.add_argument("--redis-host", default="192.168.3.120",
+    p.add_argument("--redis-host", default="127.0.0.1",
                    help="平台 Redis 地址；置空则只用预存桥梁库")
     p.add_argument("--redis-port", type=int, default=6379,
                    help="平台 Redis 端口")
     p.add_argument("--redis-password",
-                   default="1q2w3e..",
-                   help="平台 Redis 密码（也可用 --redis-password 覆盖）")
+                   default=os.environ.get("REDIS_PASSWORD", "1q2w3e.."),
+                   help="平台 Redis 密码（建议用环境变量 REDIS_PASSWORD 传入）")
     p.add_argument("--redis-db", type=int, default=1,
                    help="平台 Redis 数据库索引")
     p.add_argument("--redis-refresh", type=float, default=1.0,
@@ -119,8 +119,25 @@ def parse_args():
         help="EasyDarwin 可执行文件路径"
     )
     p.add_argument(
+        "--push-mode",
+        choices=["webrtc", "easydarwin"],
+        default="webrtc",
+        help="webrtc=优先 FFmpeg→MediaMTX→浏览器 WHEP，链路建立成功则不启动 EasyDarwin，"
+             "失败自动回退 RTMP；easydarwin=原 RTMP→EasyDarwin 方案",
+    )
+    p.add_argument(
+        "--mediamtx",
+        default="/home/jetson/programs/mediamtx",
+        help="MediaMTX 可执行文件路径（同目录需有 mediamtx.yml）",
+    )
+    p.add_argument(
+        "--webrtc-push-url",
+        default="rtsp://127.0.0.1:8554/stream_1",
+        help="WebRTC 模式下 FFmpeg 推往 MediaMTX 的 RTSP 内部地址",
+    )
+    p.add_argument(
         "--push-url",
-        default="rtmp://192.168.3.120:21935/live/stream_5?sign=CWAIkFXz9I",
+        default="rtmp://192.168.1.150:21935/live/stream_1?sign=mBk3S9ew0b",
         help="FFmpeg 推流目标地址；控制台生成的 rtmp://...?sign=... 也可（自动转 H.264）"
     )
 
@@ -181,12 +198,52 @@ def stop_EasyDarwin() -> None:
 
 
 # ──────────────────────────────────────────────
+#  MediaMTX 管理（WebRTC 分发）
+# ──────────────────────────────────────────────
+_mediamtx_proc = None
+
+
+def start_mediamtx(mediamtx_path: str) -> None:
+    global _mediamtx_proc
+
+    if not ensure_executable(mediamtx_path):
+        print(f"[MediaMTX] 找不到文件: {mediamtx_path}")
+        return
+
+    result = subprocess.run(["pgrep", "-x", "mediamtx"], capture_output=True)
+    if result.returncode == 0:
+        print("[MediaMTX] 已在运行，跳过启动")
+        return
+
+    print(f"[MediaMTX] 启动: {mediamtx_path}")
+    _mediamtx_proc = subprocess.Popen(
+        [mediamtx_path],
+        cwd=os.path.dirname(os.path.abspath(mediamtx_path)),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    time.sleep(1.5)
+    print("[MediaMTX] 推流入口 rtsp://127.0.0.1:8554  浏览器播放 → http://<JetsonIP>:8889/<流名>")
+
+
+def stop_mediamtx() -> None:
+    global _mediamtx_proc
+    if _mediamtx_proc and _mediamtx_proc.poll() is None:
+        print(f"[MediaMTX] 停止 PID={_mediamtx_proc.pid}")
+        _mediamtx_proc.terminate()
+        _mediamtx_proc = None
+        print("[MediaMTX] 已停止")
+
+
+# ──────────────────────────────────────────────
 #  退出清理
 # ──────────────────────────────────────────────
 def _cleanup(signum=None, frame=None):
     print("\n[main] 正在清理，请稍候...")
     stop_godot()
     stop_EasyDarwin()
+    stop_mediamtx()
     sys.exit(0)
 
 
@@ -252,8 +309,11 @@ def main():
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, _cleanup)
 
-    # 1. 启动 EasyDarwin (RTSP 服务器)
-    if not args.no_EasyDarwin:
+    # 1. 分发服务器：webrtc 模式起 MediaMTX（EasyDarwin 暂不起，视推流结果决定）
+    webrtc_mode = args.push_mode == "webrtc"
+    if webrtc_mode:
+        start_mediamtx(args.mediamtx)
+    elif not args.no_EasyDarwin:
         start_EasyDarwin(args.EasyDarwin)
 
     # 2. 启动 Godot 后台无头渲染
@@ -261,8 +321,23 @@ def main():
         if not ensure_executable(args.godot):
             print(f"[Godot] 找不到文件: {args.godot}，跳过启动")
         else:
-            start_godot(args.godot, rtsp_push_url=args.push_url,
-                        wait_seconds=2.0, use_h264=args.stream_h264)
+            start_godot(args.godot,
+                        rtsp_push_url=args.webrtc_push_url if webrtc_mode else args.push_url,
+                        wait_seconds=2.0,
+                        use_h264=True if webrtc_mode else args.stream_h264)
+
+            if webrtc_mode:
+                # ffmpeg rtsp muxer 连不上服务器会立刻退出，等 1s 探测即知链路是否建立
+                time.sleep(1.0)
+                if push_is_alive():
+                    print("[Push] WebRTC 链路正常，EasyDarwin 保持不启动")
+                    print(f"[Push] 浏览器播放: http://192.168.1.150:8889/{args.webrtc_push_url.rsplit('/', 1)[-1]}")
+                elif not args.no_EasyDarwin:
+                    print("[Push] ⚠ WebRTC 推流未建立（MediaMTX 不可达？），回退 EasyDarwin/RTMP")
+                    start_EasyDarwin(args.EasyDarwin)
+                    restart_push(args.push_url)
+                else:
+                    print("[Push] ⚠ WebRTC 推流未建立，且 --no-EasyDarwin，本次运行无分发")
 
     # 3. 检查 TRT Engine
     if not os.path.isfile(SHIP_ENGINE_PATH):

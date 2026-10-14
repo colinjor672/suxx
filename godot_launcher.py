@@ -62,6 +62,8 @@ def _start_ffmpeg_mux(rtsp_url: str, use_h264: bool = False) -> bool:
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-tune", "zerolatency",
+            # 浏览器 WebRTC 只协商 constrained-baseline，需显式声明
+            "-profile:v", "baseline",
             "-g", str(FRAME_FPS),
             "-pix_fmt", "yuv420p",
         ]
@@ -98,6 +100,33 @@ def _start_ffmpeg_mux(rtsp_url: str, use_h264: bool = False) -> bool:
     except Exception as e:
         print(f"[FFmpeg] 启动失败: {e}")
         return False
+
+
+def push_is_alive() -> bool:
+    """FFmpeg 推流进程当前是否存活（main 用它判定 WebRTC 链路是否建立成功）"""
+    return _ffmpeg_proc is not None and _ffmpeg_proc.poll() is None
+
+
+def _stop_ffmpeg_proc() -> None:
+    global _ffmpeg_proc
+    if _ffmpeg_proc and _ffmpeg_proc.poll() is None:
+        print("[FFmpeg] 停止推流")
+        try:
+            _ffmpeg_proc.stdin.close()
+        except Exception:
+            pass
+        _ffmpeg_proc.terminate()
+        try:
+            _ffmpeg_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _ffmpeg_proc.kill()
+    _ffmpeg_proc = None
+
+
+def restart_push(push_url: str) -> bool:
+    """停止当前 FFmpeg 并用新地址重启（WebRTC 失败回退 EasyDarwin RTMP 时用）"""
+    _stop_ffmpeg_proc()
+    return _start_ffmpeg_mux(push_url, use_h264=True)
 
 
 def _frame_reader_loop():
@@ -364,18 +393,7 @@ def stop_godot() -> None:
         _nvjpeg_enc = None
 
     # 停止 FFmpeg
-    if _ffmpeg_proc and _ffmpeg_proc.poll() is None:
-        print("[FFmpeg] 停止推流")
-        try:
-            _ffmpeg_proc.stdin.close()
-        except Exception:
-            pass
-        _ffmpeg_proc.terminate()
-        try:
-            _ffmpeg_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _ffmpeg_proc.kill()
-        _ffmpeg_proc = None
+    _stop_ffmpeg_proc()
 
     if _godot_proc and _godot_proc.poll() is None:
         print(f"[Godot] 停止 PID={_godot_proc.pid}")

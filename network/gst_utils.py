@@ -309,20 +309,15 @@ class GstTeeCapture:
             Gst.init(None)
 
             if is_rtsp:
+     
+                # RTSP 流：rtspsrc → 硬解，sync=false 低延迟
                 pipeline_str = (
                     f'rtspsrc location="{source}" protocols=4 latency=500 ! '
-                    "decodebin ! videoscale ! videoconvert ! "
+                    "decodebin ! "
+                    "nvvidconv ! "
                     f"video/x-raw,format=RGBA,width={self.AI_W},height={self.AI_H} ! "
                     "appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
                 )
-                # RTSP 流：rtspsrc → 硬解，sync=false 低延迟
-                #pipeline_str = (
-                    #f'rtspsrc location="{source}" protocols=4 latency=500 ! '
-                    #"decodebin ! "
-                    #"nvvidconv ! "
-                    #f"video/x-raw,format=RGBA,width={self.AI_W},height={self.AI_H} ! "
-                    #"appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
-                #)
             else:
                 # 本地文件由 appsink 按媒体 PTS 同步到 GStreamer 时钟。
                 abs_path = os.path.abspath(source)

@@ -187,6 +187,41 @@ class EnuMissionRoute:
     def length_m(self) -> float:
         return float(self.arc_m[-1])
 
+    def rotated_about_origin(self, angle_rad: float) -> "EnuMissionRoute":
+        """整条航线绕原点（船位锚点）旋转 angle_rad（heading 约定，顺时针为正）。
+
+        旋转是线性的且原点即锚点，east_m 与 mission_east_m 的包含关系保持不变；
+        弧长逐段不变，arc_m 直接复用。用于激活时按"当前艏向 − 航线起始切线"
+        把航线旋转到船当前体系，消掉规划位姿与当前位姿之间的朝向差。
+        """
+        cos_a = math.cos(float(angle_rad))
+        sin_a = math.sin(float(angle_rad))
+
+        def _rotate(
+            east: np.ndarray, north: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+            return (
+                east * cos_a + north * sin_a,
+                -east * sin_a + north * cos_a,
+            )
+
+        east, north = _rotate(self.east_m, self.north_m)
+        mission_east, mission_north = _rotate(
+            self.mission_east_m, self.mission_north_m
+        )
+        arc = self.arc_m.copy()
+        for array in (east, north, arc, mission_east, mission_north):
+            array.setflags(write=False)
+        return EnuMissionRoute(
+            east,
+            north,
+            arc,
+            mission_east,
+            mission_north,
+            alignment_east_m=self.alignment_east_m,
+            alignment_north_m=self.alignment_north_m,
+        )
+
     def _position(self, arc_m: np.ndarray | float) -> tuple[np.ndarray, np.ndarray]:
         query = np.asarray(arc_m, dtype=np.float64)
         clipped = np.clip(query, 0.0, self.length_m)
@@ -290,6 +325,7 @@ class RealtimeNavigationState:
         route_heading_points: int = 5,
         gnss_heading_points: int = 5,
         heading_ema_alpha: float = 0.25,
+        route_max_rotation_deg: float = 60.0,
     ):
         if lookahead_m <= 0.0 or sample_spacing_m <= 0.0:
             raise ValueError("Navigation distances must be greater than zero")
@@ -303,6 +339,8 @@ class RealtimeNavigationState:
             raise ValueError("Heading point spans must be at least 2")
         if not 0.0 < heading_ema_alpha <= 1.0:
             raise ValueError("Heading EMA alpha must be in (0, 1]")
+        if not 0.0 < route_max_rotation_deg <= 180.0:
+            raise ValueError("Route max rotation must be in (0, 180] degrees")
 
         self.lookahead_m = float(lookahead_m)
         self.sample_spacing_m = float(sample_spacing_m)
@@ -315,6 +353,7 @@ class RealtimeNavigationState:
         self.route_heading_points = int(route_heading_points)
         self.gnss_heading_points = int(gnss_heading_points)
         self.heading_ema_alpha = float(heading_ema_alpha)
+        self.route_max_rotation_deg = float(route_max_rotation_deg)
 
         self._lock = threading.RLock()
         # 本地 GNSS 缓冲区：按时间裁剪，只保留最近 gnss_cache_window_s 秒的样本
@@ -329,6 +368,9 @@ class RealtimeNavigationState:
         # 平滑后的导航带朝向（真方位角，弧度）及其是否已初始化
         self._band_yaw_rad = 0.0
         self._band_yaw_valid = False
+        # 激活时艏向与航线起始切线角度差超过 route_max_rotation_deg 未旋转航线，
+        # band yaw 初始化锚定航线方向而非船艏向（大角度差说明艏向源不可信）
+        self._band_yaw_prefer_route = False
         self._last_speed_update_monotonic: float | None = None
         self._last_progress_monotonic: float | None = None
         # 最近一次 prediction 报文里的 dcpaResults 目标（避障指定的单一目标），
@@ -497,6 +539,38 @@ class RealtimeNavigationState:
                 aligned.longitude_rad,
             )
 
+            # 朝向对齐：DWA 按规划时刻位姿生成的航线，到达时船艏向往往已经
+            # 转过一段角度（管线延迟 × 转弯角速度），只平移不旋转会让导航带
+            # 先向反方向偏。第一级：角度差在阈值内，整条航线绕船位旋转 diff，
+            # 使起始切线对齐当前艏向；第二级：角度差过大（航线/艏向源已脱节，
+            # 旋转会扭曲航线），不旋转，band yaw 初始化改为锚定航线方向。
+            self._band_yaw_prefer_route = False
+            heading_note: str | None = None
+            vessel_heading = self._vessel_heading_locked()
+            if vessel_heading is not None:
+                route_start_heading = route.heading_at(
+                    0.0, self.route_heading_points
+                )
+                heading_diff = math.atan2(
+                    math.sin(vessel_heading - route_start_heading),
+                    math.cos(vessel_heading - route_start_heading),
+                )
+                max_rotation = math.radians(self.route_max_rotation_deg)
+                if abs(heading_diff) <= max_rotation:
+                    if abs(heading_diff) > math.radians(0.5):
+                        route = route.rotated_about_origin(heading_diff)
+                    action = f"rotate={math.degrees(heading_diff):.1f}deg"
+                else:
+                    self._band_yaw_prefer_route = True
+                    action = "anchor-route-heading"
+                heading_note = (
+                    "[RealtimeNav] heading alignment: "
+                    f"vessel={math.degrees(vessel_heading):.1f}deg "
+                    f"route_start={math.degrees(route_start_heading):.1f}deg "
+                    f"diff={math.degrees(heading_diff):.1f}deg "
+                    f"action={action}"
+                )
+
             elapsed_since_command = max(0.0, epoch - trigger)
             initial_progress = (
                 initial_speed * elapsed_since_command
@@ -514,7 +588,13 @@ class RealtimeNavigationState:
             self._last_speed_update_monotonic = monotonic
             self._last_progress_monotonic = monotonic
 
-        self._log_route(route, aligned, skew, now_monotonic=monotonic)
+        self._log_route(
+            route,
+            aligned,
+            skew,
+            now_monotonic=monotonic,
+            heading_note=heading_note,
+        )
         return route
 
     def _log_route(
@@ -524,6 +604,7 @@ class RealtimeNavigationState:
         skew_s: float,
         *,
         now_monotonic: float | None = None,
+        heading_note: str | None = None,
     ) -> None:
         # 每条预测消息都会重建航线，逐点 ENU 打印会刷屏：按 3 秒节流放行一批
         monotonic = time.monotonic() if now_monotonic is None else float(now_monotonic)
@@ -548,6 +629,8 @@ class RealtimeNavigationState:
             f"east={route.alignment_east_m:.3f}m "
             f"north={route.alignment_north_m:.3f}m; applied to all route points"
         )
+        if heading_note is not None:
+            nav_log(heading_note)
 
     def _latest_speed_locked(self, now_epoch: float) -> float:
         if len(self._samples) < self.speed_window_points:
@@ -628,7 +711,11 @@ class RealtimeNavigationState:
             return
         route_heading = route.heading_at(self._progress_m, self.route_heading_points)
         if not self._band_yaw_valid:
-            vessel_heading = self._vessel_heading_locked()
+            vessel_heading = (
+                None
+                if self._band_yaw_prefer_route
+                else self._vessel_heading_locked()
+            )
             self._band_yaw_rad = (
                 vessel_heading if vessel_heading is not None else route_heading
             )
