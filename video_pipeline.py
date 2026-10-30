@@ -412,8 +412,9 @@ def process_video(input_video, output_video,
                 frame = result
                 bgr_frame = frame
                 import cv2 as _cv2
-                bgr_small = _cv2.resize(frame, (640, 360))
-                rgba_frame = _cv2.cvtColor(bgr_small, _cv2.COLOR_BGR2RGBA)
+                # Godot 分支固定 1280×720；AI 仍用上面的原始 frame
+                godot_frame = _cv2.resize(frame, (1280, 720))
+                rgba_frame = _cv2.cvtColor(godot_frame, _cv2.COLOR_BGR2RGBA)
                 if frame_idx == 0:
                     print("[Pipeline] ⚠ 使用 CPU 回退: cv2.resize + cvtColor", flush=True)
 

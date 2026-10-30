@@ -5,17 +5,18 @@ import subprocess
 import time
 import threading
 
-from network.gst_utils import NvJpegEncoder
 from network.shm_sync import ShmSyncPy
 
 _godot_proc    = None
 _godot_log     = None
 _ffmpeg_proc   = None
-_nvjpeg_enc    = None
 _reader_thread = None
 _reader_stop   = False
 _frame_shm     = None  # ShmSyncPy Reader
 
+# 必须与 Visualization/scripts/render/frame_streamer.gd 的
+# STREAM_WIDTH / STREAM_HEIGHT 完全一致，否则共享内存里的 RGBA 像素
+# 会被按错误的行宽重排，画面出现横向拼接、重影和花屏。
 FRAME_W      = 640
 FRAME_H      = 360
 FRAME_SIZE   = FRAME_W * FRAME_H * 4  # RGBA
@@ -34,41 +35,36 @@ _OLD_SHM_PATHS = [
 ]
 
 
-def _start_ffmpeg_mux(rtsp_url: str, use_h264: bool = False) -> bool:
-    """FFmpeg 推流模式：读 JPEG 字节流 → RTSP 或 RTMP
+def _start_ffmpeg_mux(rtsp_url: str) -> bool:
+    """FFmpeg 推流模式：读原始 RGBA 字节流 → libx264 → RTSP 或 RTMP
 
-    use_h264=False: 纯封装 -c:v copy（零 CPU 编码，仅 RTSP 可用）
-    use_h264=True : 转码 libx264 ultrafast
-    rtmp:// 地址自动按 -f flv 封装并强制 libx264（FLV 容器不支持 MJPEG）
+    从共享内存直接取 RGBA，省掉 nvjpeg 编 JPEG、ffmpeg 再解 JPEG
+    的代际损失；rtmp:// 地址自动按 -f flv 封装。
     """
     global _ffmpeg_proc
 
     is_rtmp = rtsp_url.startswith("rtmp://")
-    if is_rtmp and not use_h264:
-        print("[FFmpeg] RTMP 分发不支持 MJPEG，自动切换 libx264 转码")
-        use_h264 = True
 
-    # 输入端显式声明尺寸/帧率：pipe 探测不到 mjpeg 分辨率，
-    # 否则 SDP 里带宽高信息缺失，订阅端报 "codec parameters ... unspec"
     input_args = [
-        "-f", "image2pipe",
-        "-vcodec", "mjpeg",
+        "-f", "rawvideo",
+        "-pix_fmt", "rgba",
         "-video_size", f"{FRAME_W}x{FRAME_H}",
         "-framerate", str(FRAME_FPS),
+        "-fflags", "nobuffer",
         "-i", "pipe:0",
     ]
-    if use_h264:
-        output_args = [
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
-            # 浏览器 WebRTC 只协商 constrained-baseline，需显式声明
-            "-profile:v", "baseline",
-            "-g", str(FRAME_FPS),
-            "-pix_fmt", "yuv420p",
-        ]
-    else:
-        output_args = ["-c:v", "copy"]
+    output_args = [
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        # 浏览器 WebRTC 只协商 constrained-baseline，需显式声明
+        "-profile:v", "baseline",
+        "-b:v", "3000k", "-maxrate", "3500k", "-bufsize", "3000k",
+        # GOP 2s：I 帧编码成本约为 P 帧 3-5 倍，拉长减半省 CPU；
+        # 观看端中途加入最多多等 2s 出画面
+        "-g", str(FRAME_FPS * 2),
+        "-pix_fmt", "yuv420p",
+    ]
 
     if is_rtmp:
         mux_args = ["-f", "flv"]
@@ -84,7 +80,7 @@ def _start_ffmpeg_mux(rtsp_url: str, use_h264: bool = False) -> bool:
         rtsp_url,
     ]
 
-    print(f"[FFmpeg] {'libx264 转码' if use_h264 else '纯封装 -c:v copy'} → "
+    print(f"[FFmpeg] RGBA → libx264 → "
           f"{'RTMP/FLV' if is_rtmp else 'RTSP'} {rtsp_url}")
     try:
         _ffmpeg_proc = subprocess.Popen(
@@ -102,8 +98,19 @@ def _start_ffmpeg_mux(rtsp_url: str, use_h264: bool = False) -> bool:
         return False
 
 
+def _start_legacy_push(push_url: str) -> None:
+    """推流链路：共享内存 RGBA → ffmpeg libx264（RTSP 或 RTMP）"""
+    global _reader_thread, _reader_stop
+
+    _start_ffmpeg_mux(push_url)
+
+    _reader_stop = False
+    _reader_thread = threading.Thread(target=_frame_reader_loop, daemon=True)
+    _reader_thread.start()
+
+
 def push_is_alive() -> bool:
-    """FFmpeg 推流进程当前是否存活（main 用它判定 WebRTC 链路是否建立成功）"""
+    """推流当前是否存活（main 用它判定 WebRTC 链路建立成功）"""
     return _ffmpeg_proc is not None and _ffmpeg_proc.poll() is None
 
 
@@ -124,19 +131,26 @@ def _stop_ffmpeg_proc() -> None:
 
 
 def restart_push(push_url: str) -> bool:
-    """停止当前 FFmpeg 并用新地址重启（WebRTC 失败回退 EasyDarwin RTMP 时用）"""
+    """停止当前推流并用新地址重启（WebRTC 失败回退 EasyDarwin/RTMP 时用）"""
+    global _reader_thread, _reader_stop
+
+    _reader_stop = True
+    if _reader_thread is not None and _reader_thread.is_alive():
+        _reader_thread.join(timeout=1.0)
+    _reader_thread = None
+
     _stop_ffmpeg_proc()
-    return _start_ffmpeg_mux(push_url, use_h264=True)
+    _start_legacy_push(push_url)
+    return _ffmpeg_proc is not None and _ffmpeg_proc.poll() is None
 
 
 def _frame_reader_loop():
-    """semaphore 等待 Godot 合成帧 → nvjpegenc GPU 编码 → FFmpeg 推流"""
-    global _reader_stop, _ffmpeg_proc, _nvjpeg_enc, _frame_shm
+    """semaphore 等待 Godot 合成帧 → 原始 RGBA 写入 FFmpeg"""
+    global _reader_stop, _ffmpeg_proc, _frame_shm
 
     last_frame_id = -1
     drop_count = 0
     push_count = 0
-    enc_fail = 0
     timeout_ms = 200  # 200ms 超时
 
     while not _reader_stop:
@@ -164,34 +178,22 @@ def _frame_reader_loop():
             if len(rgba_data) != FRAME_SIZE:
                 continue
 
-            # ★ nvjpegenc GPU 硬件编码：RGBA bytes → JPEG bytes
-            if _nvjpeg_enc:
-                jpeg_data = _nvjpeg_enc.encode_bytes(rgba_data)
-                if not jpeg_data:
-                    enc_fail += 1
-                    if enc_fail <= 3:
-                        print("[Reader] nvjpegenc 编码返回空", flush=True)
-                    continue
+            # 只推最新帧：写管道前 Godot 又交了新帧，则丢弃这张旧帧，
+            # 防止 ffmpeg 消费不及时时旧帧在管道里排队累积延迟
+            if _frame_shm.get_frame_id() != frame_id:
+                continue
 
-                if _ffmpeg_proc and _ffmpeg_proc.poll() is None:
-                    try:
-                        _ffmpeg_proc.stdin.write(jpeg_data)
-                        _ffmpeg_proc.stdin.flush()
-                    except (BrokenPipeError, OSError):
-                        pass
-            else:
-                # 回退：直接写 RGBA 到 FFmpeg
-                if _ffmpeg_proc and _ffmpeg_proc.poll() is None:
-                    try:
-                        _ffmpeg_proc.stdin.write(rgba_data)
-                        _ffmpeg_proc.stdin.flush()
-                    except (BrokenPipeError, OSError):
-                        pass
+            if _ffmpeg_proc and _ffmpeg_proc.poll() is None:
+                try:
+                    _ffmpeg_proc.stdin.write(rgba_data)
+                    _ffmpeg_proc.stdin.flush()
+                except (BrokenPipeError, OSError):
+                    pass
 
             push_count += 1
             if push_count % 200 == 0:
                 print(f"[Reader] 已推送 {push_count} 帧 "
-                      f"(丢弃 {drop_count}, 编码失败 {enc_fail})")
+                      f"(丢弃 {drop_count})")
 
         except Exception:
             time.sleep(0.01)
@@ -278,8 +280,8 @@ def _cleanup_stale_godot():
 
 
 def start_godot(godot_exe_path: str, rtsp_push_url: str = None,
-                wait_seconds: float = 4.0, use_h264: bool = False):
-    global _godot_proc, _godot_log, _ffmpeg_proc, _nvjpeg_enc
+                wait_seconds: float = 4.0):
+    global _godot_proc, _godot_log, _ffmpeg_proc
     global _reader_thread, _reader_stop, _frame_shm
 
     if not godot_exe_path or not godot_exe_path.strip():
@@ -311,21 +313,13 @@ def start_godot(godot_exe_path: str, rtsp_push_url: str = None,
         except Exception:
             pass
 
-    # 1. 启动 nvjpegenc GPU 硬件编码器
-    print("[NvJpeg] 初始化 GPU 硬件 JPEG 编码器...")
-    _nvjpeg_enc = NvJpegEncoder(width=FRAME_W, height=FRAME_H, fps=FRAME_FPS, quality=80)
-    if not _nvjpeg_enc.start():
-        print("[NvJpeg] GPU 编码器启动失败，将回退到 FFmpeg MJPEG CPU 编码")
-        _nvjpeg_enc = None
+    # 1. 推流后端：nvjpeg + ffmpeg（实际启动在 shm Reader 打开之后）
 
-    # 2. 启动 FFmpeg 推流（默认纯封装 copy，可切 H.264 转码）
-    _start_ffmpeg_mux(push_url, use_h264=use_h264)
-
-    # 3. 打开 ShmSyncPy Reader（Godot 端是 Writer）
+    # 2. 打开 ShmSyncPy Reader（Godot 端是 Writer）
     #    等待 Godot 启动后再打开，因为 Godot 创建共享内存
     print("[ShmSync] 等待 Godot 创建共享内存...")
 
-    # 4. 启动 Godot
+    # 3. 启动 Godot
     env = os.environ.copy()
     env.setdefault("DISPLAY", ":0")
     env["__GL_SYNC_TO_VBLANK"] = "0"
@@ -351,24 +345,22 @@ def start_godot(godot_exe_path: str, rtsp_push_url: str = None,
         print(f"[Godot] 进程退出，退出码={_godot_proc.returncode}")
         return None
 
-    # 5. 等待 Godot 创建共享内存后，打开 Reader
+    # 4. 等待 Godot 创建共享内存后，打开 Reader
     for attempt in range(30):
         try:
             _frame_shm = ShmSyncPy("shm_frame", FRAME_SIZE, is_writer=False)
             print("[ShmSync] Reader 已连接 shm_frame (mmap+semaphore)")
             break
-        except OSError:
+        except OSError as e:
             if attempt == 0:
-                print("[ShmSync] 等待 Godot 创建 shm_frame...")
+                print(f"[ShmSync] 等待 Godot 创建 shm_frame... ({e})")
             time.sleep(0.5)
     else:
         print("[ShmSync] ⚠ 无法连接 shm_frame，回退到文件轮询模式")
         _frame_shm = None
 
-    # 6. 启动帧读取线程
-    _reader_stop = False
-    _reader_thread = threading.Thread(target=_frame_reader_loop, daemon=True)
-    _reader_thread.start()
+    # 5. 启动推流后端
+    _start_legacy_push(push_url)
 
     print(f"[Godot] PID={_godot_proc.pid}  窗口已在显示器上显示")
     print(f"[Godot] RTSP 推流: {push_url}")
@@ -377,7 +369,7 @@ def start_godot(godot_exe_path: str, rtsp_push_url: str = None,
 
 
 def stop_godot() -> None:
-    global _godot_proc, _godot_log, _ffmpeg_proc, _nvjpeg_enc
+    global _godot_proc, _godot_log, _ffmpeg_proc
     global _reader_thread, _reader_stop, _frame_shm
 
     _reader_stop = True
@@ -386,11 +378,6 @@ def stop_godot() -> None:
     if _frame_shm:
         _frame_shm.close()
         _frame_shm = None
-
-    # 停止 nvjpegenc 编码器
-    if _nvjpeg_enc:
-        _nvjpeg_enc.stop()
-        _nvjpeg_enc = None
 
     # 停止 FFmpeg
     _stop_ffmpeg_proc()

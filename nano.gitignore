@@ -5,8 +5,6 @@ __pycache__/
 
 # Godot
 .godot/
-*.pck
-*.arm64
 export_presets.cfg
 export_credentials.cfg
 

@@ -297,7 +297,10 @@ def attach_dcpa_target(
 ) -> dict | None:
     """把避障指定的单一目标信息吸附到当前帧最接近的 YOLO 框上。
 
-    阈值取 max(base, 框对角线 × diag_ratio)：base 按当帧宽度归一
+    优先按 alert["target_id"]（避障服务回传的 ship_id）绑定；
+    ID 找不到（track 已过期或服务延迟）时退回像素中心匹配。
+
+    像素兜底的阈值取 max(base, 框对角线 × diag_ratio)：base 按当帧宽度归一
     （base_px_640 × frame_width / 640），所以 640 空间是 12px、1280 空间是 24px，
     代表的物理宽度一致；对角线项让近处大框自动放宽、远处小框收紧。
     pixel_bbox 必须与 ships 的 bbox 同一坐标空间（AI 解码帧），
@@ -311,12 +314,49 @@ def attach_dcpa_target(
     for ship in ships or ():
         ship["is_dcpa_target"] = False
 
-    if not ships or not alert or not isinstance(pixel_bbox, (list, tuple)):
+    if not ships or not alert:
+        return None
+
+    def _count(key: str):
+        if stats is not None:
+            stats[key] = stats.get(key, 0) + 1
+
+    def _apply(ship):
+        ship["is_dcpa_target"] = True
+        ship["dcpa"] = float(alert["dcpa"])
+        ship["tcpa"] = float(alert["tcpa"])
+        # 框色仍按 distance 分档，这里改用避障回传的距离
+        ship["distance"] = float(alert["distance"])
+        ship["dcpa_alert_level"] = str(alert.get("alert_level", ""))
+        ship["dcpa_alert_info"] = str(alert.get("alert_info", ""))
+        return ship
+
+    # 1) 优先按避障回传的 target_id（= 我们下发的 ship_id）绑定
+    target_id = alert.get("target_id")
+    if target_id is not None:
+        try:
+            target_id = int(target_id)
+        except (TypeError, ValueError, OverflowError):
+            target_id = None
+    if target_id is not None:
+        for ship in ships:
+            try:
+                if int(ship.get("ship_id", -1)) == target_id:
+                    _count("hit")
+                    return _apply(ship)
+            except (TypeError, ValueError):
+                continue
+        # ID 没命中时继续走像素兜底
+
+    # 2) 像素兜底
+    if not isinstance(pixel_bbox, (list, tuple)):
+        _count("miss")
         return None
 
     try:
         px1, py1, px2, py2 = (float(v) for v in pixel_bbox[:4])
     except (TypeError, ValueError):
+        _count("miss")
         return None
 
     target_cx = (px1 + px2) * 0.5
@@ -326,10 +366,6 @@ def attach_dcpa_target(
         base_px = base_px_640 * float(frame_width) / 640.0
     except (TypeError, ValueError):
         base_px = base_px_640
-
-    def _count(key: str):
-        if stats is not None:
-            stats[key] = stats.get(key, 0) + 1
 
     candidates = []
     for ship in ships:
@@ -364,12 +400,4 @@ def attach_dcpa_target(
             return None
 
     _count("hit")
-    ship = best["ship"]
-    ship["is_dcpa_target"] = True
-    ship["dcpa"] = float(alert["dcpa"])
-    ship["tcpa"] = float(alert["tcpa"])
-    # 框色仍按 distance 分档，这里改用避障回传的距离
-    ship["distance"] = float(alert["distance"])
-    ship["dcpa_alert_level"] = str(alert.get("alert_level", ""))
-    ship["dcpa_alert_info"] = str(alert.get("alert_info", ""))
-    return ship
+    return _apply(best["ship"])

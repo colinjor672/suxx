@@ -26,7 +26,7 @@ from godot_launcher import start_godot, stop_godot, push_is_alive, restart_push
 def parse_args():
     p = argparse.ArgumentParser(description="Navigation")
     #cap = cv2.VideoCapture(input_video)  # input_video 是 "video.mp4" 文件
-    p.add_argument("--input", default="rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101")#rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101
+    p.add_argument("--input", default="rtsp://admin:gzsia2011@192.168.3.171:554/Streaming/Channels/101")#rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101
     p.add_argument("--output", default="output_nav.mp4")
     p.add_argument("--seg",    default="best_fp16.engine")
     p.add_argument("--device", default="cuda")
@@ -128,7 +128,7 @@ def parse_args():
     p.add_argument(
         "--mediamtx",
         default="/home/jetson/programs/mediamtx",
-        help="MediaMTX 可执行文件路径（同目录需有 mediamtx.yml）",
+        help="MediaMTX 可执行文件路径（mediamtx.yml 需与其同目录）",
     )
     p.add_argument(
         "--webrtc-push-url",
@@ -323,8 +323,7 @@ def main():
         else:
             start_godot(args.godot,
                         rtsp_push_url=args.webrtc_push_url if webrtc_mode else args.push_url,
-                        wait_seconds=2.0,
-                        use_h264=True if webrtc_mode else args.stream_h264)
+                        wait_seconds=2.0)
 
             if webrtc_mode:
                 # ffmpeg rtsp muxer 连不上服务器会立刻退出，等 1s 探测即知链路是否建立

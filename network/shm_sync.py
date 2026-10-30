@@ -110,11 +110,25 @@ class ShmSyncPy:
                 _libc.close(self._shm_fd)
                 raise OSError(err, f"ftruncate 失败: {os.strerror(err)}")
 
-        # 3. mmap（ACCESS_WRITE = MAP_SHARED + PROT_READ|PROT_WRITE）
+        # 3. 尺寸校验（Reader 侧）：实际 shm 大小必须与请求帧尺寸完全一致。
+        #    不等时若实际更大，mmap 仍会成功，随后读取的像素会按错误行宽重排，
+        #    画面表现为横向拼接、重影和花屏；这里提前报错，避免静默出坏图。
+        if not self._is_writer:
+            actual = os.fstat(self._shm_fd).st_size
+            if actual != self._total_size:
+                _libc.close(self._shm_fd)
+                self._shm_fd = -1
+                raise OSError(
+                    f"shm '{self._name}' 尺寸不匹配: 实际 {actual} B, "
+                    f"期望 {self._total_size} B "
+                    f"({self._data_size} B 像素 + 4 B 帧号)"
+                )
+
+        # 4. mmap（ACCESS_WRITE = MAP_SHARED + PROT_READ|PROT_WRITE）
         self._mmap_obj = mmap.mmap(self._shm_fd, self._total_size,
                                    access=mmap.ACCESS_WRITE)
 
-        # 4. sem_open
+        # 5. sem_open
         sem_name = f"/{self._name}_sem"
         sem_bytes = sem_name.encode("utf-8")
         if self._is_writer:

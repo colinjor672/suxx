@@ -718,7 +718,7 @@ class BridgeWarningEngine:
                  deck_row_offset: float = 5.0,
                  deck_alpha: float = 0.6,
                  deck_max_jump: float = 40.0,
-                 min_draw_dist: float = 10.0,
+                 min_draw_dist: float = 30.0,
                  coord_scale: float = 1.0,
                  diag_interval: float = 1.0,
                  alert_client: "BridgeAlertClient | None" = None):

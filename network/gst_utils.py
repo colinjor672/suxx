@@ -265,15 +265,19 @@ class GstVideoCapture:
 
 class GstTeeCapture:
     """
-    GStreamer 单路捕获：nvvidconv GPU 直接输出 RGBA，零 CPU 色彩转换
+    GStreamer 双路捕获：nvvidconv (VIC) 分两路出 RGBA，零 CPU 色彩转换
 
-      rtspsrc → nvv4l2decoder → nvvidconv → RGBA 640×360 → appsink
+      rtspsrc → nvv4l2decoder → tee
+        ├─ nvvidconv → RGBA 640×360  → appsink(ai_sink)    → AI 推理（BGR view）
+        └─ nvvidconv → RGBA 1280×720 → appsink(godot_sink) → shm_input → Godot
 
-    回调中只做 1 次拷贝（GStreamer buffer 生命周期要求），
+    AI 分支保持 640×360，推理输入与耗时不变；Godot 分支原生 720p，
+    避免 640×360 在 1280×720 画布上放大再缩回导致的糊化。
+    回调中每路只做 1 次拷贝（GStreamer buffer 生命周期要求），
     BGR 通过 rgba[:, :, :3] view 获取，零额外拷贝。
     """
     AI_W, AI_H       = 640, 360
-    GODOT_W, GODOT_H = 640, 360
+    GODOT_W, GODOT_H = 1280, 720
     GST_CLOCK_TIME_NONE = 18446744073709551615   # 2^64 - 1，GStreamer 表示无效时间戳
 
     def __init__(self, source: str, fps: float = 30.0):
@@ -283,9 +287,14 @@ class GstTeeCapture:
         self._loop = None
         self._error_msg = ""
 
-        self._frame_queue = deque(maxlen=2)
+        # 两个分支各自只保留最新一帧；read() 等两路都有数据后一起取走。
+        # 主循环 24fps、源 25~30fps 本来就会丢帧，逐帧配对没有意义。
+        self._ai_frame = None      # (bgr_view, pts_ns, pts_latency_s)
+        self._godot_frame = None   # (rgba, pts_ns)
         self._frame_ready = threading.Condition()
-        self._cb_count = 0
+        self._ai_count = 0
+        self._godot_count = 0
+        self._err_count = 0
 
         # 本地文件由 GStreamer 时钟和主循环 FramePacer 双重保证播放节拍。
         import os
@@ -309,70 +318,112 @@ class GstTeeCapture:
             Gst.init(None)
 
             if is_rtsp:
-     
-                # RTSP 流：rtspsrc → 硬解，sync=false 低延迟
+                # 平台这个源经 decodebin 出的是 GPU/NVMM 帧（日志有 NVMMLITE_NVVIDEODEC），
+                # 所以缩放只能用 nvvidconv；换成 videoscale ! videoconvert 的纯 CPU 链会
+                # 立刻 "Delayed linking failed" 起不来（已实测，别再试）。
+                # protocols=4 强制 RTSP 走 TCP，location 必须加引号（URL 里有 @ 和 :）。
+                # TCP 传输无乱序，jitterbuffer 只需吸收小抖动：latency 500→50，
+                # 并开 drop-on-latency，否则稳态就有 ~200ms 的固定排队延迟。
+                # tee 后两路各自 queue：AI 640×360 给推理，Godot 1280×720 给显示，
+                # 缩放都在 VIC 上做，CPU 只承担一次 buffer 拷贝。
                 pipeline_str = (
-                    f'rtspsrc location="{source}" protocols=4 latency=500 ! '
-                    "decodebin ! "
-                    "nvvidconv ! "
-                    f"video/x-raw,format=RGBA,width={self.AI_W},height={self.AI_H} ! "
-                    "appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
+                    f'rtspsrc location="{source}" protocols=4 latency=50 '
+                    "drop-on-latency=true ! "
+                    "decodebin ! tee name=t "
+                    "t. ! queue leaky=downstream max-size-buffers=2 "
+                    "max-size-bytes=0 max-size-time=0 ! "
+                    f"nvvidconv ! video/x-raw,format=RGBA,"
+                    f"width={self.AI_W},height={self.AI_H} ! "
+                    "appsink name=ai_sink emit-signals=true max-buffers=2 "
+                    "drop=true sync=false "
+                    "t. ! queue leaky=downstream max-size-buffers=2 "
+                    "max-size-bytes=0 max-size-time=0 ! "
+                    f"nvvidconv ! video/x-raw,format=RGBA,"
+                    f"width={self.GODOT_W},height={self.GODOT_H} ! "
+                    "appsink name=godot_sink emit-signals=true max-buffers=2 "
+                    "drop=true sync=false"
                 )
             else:
                 # 本地文件由 appsink 按媒体 PTS 同步到 GStreamer 时钟。
                 abs_path = os.path.abspath(source)
                 uri = "file://" + abs_path
                 pipeline_str = (
-                    f"uridecodebin uri={uri} ! "
-                    "nvvidconv ! "
-                    f"video/x-raw,format=RGBA,width={self.AI_W},height={self.AI_H} ! "
-                    "appsink name=sink emit-signals=true max-buffers=2 drop=false sync=true"
+                    f"uridecodebin uri={uri} ! tee name=t "
+                    "t. ! queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! "
+                    f"nvvidconv ! video/x-raw,format=RGBA,"
+                    f"width={self.AI_W},height={self.AI_H} ! "
+                    "appsink name=ai_sink emit-signals=true max-buffers=2 "
+                    "drop=false sync=true "
+                    "t. ! queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! "
+                    f"nvvidconv ! video/x-raw,format=RGBA,"
+                    f"width={self.GODOT_W},height={self.GODOT_H} ! "
+                    "appsink name=godot_sink emit-signals=true max-buffers=2 "
+                    "drop=false sync=true"
                 )
                 print(f"[GstTee] 本地视频文件 (PTS 限帧): {abs_path}")
 
             self._pipeline = Gst.parse_launch(pipeline_str)
 
-            sink = self._pipeline.get_by_name("sink")
-            if sink is None:
+            ai_sink = self._pipeline.get_by_name("ai_sink")
+            godot_sink = self._pipeline.get_by_name("godot_sink")
+            if ai_sink is None or godot_sink is None:
                 self._error_msg = "未找到 appsink"
                 return
 
-            expected = self.AI_H * self.AI_W * 4  # RGBA
+            def make_on_sample(kind, w, h):
+                expected = w * h * 4  # RGBA
 
-            def on_sample(s):
-                try:
-                    self._cb_count += 1
-                    sample = s.emit("pull-sample")
-                    if not sample:
-                        return Gst.FlowReturn.OK
-                    buf = sample.get_buffer()
-                    pts_ns = buf.pts  # GStreamer PTS 时间戳（纳秒）
-                    pts_latency_s = self._estimate_pts_latency(pts_ns)
-                    result, map_info = buf.map(Gst.MapFlags.READ)
-                    if not result:
-                        return Gst.FlowReturn.OK
-                    # 唯一一次拷贝（GStreamer buffer 在 unmap 后失效）
-                    rgba = np.frombuffer(
-                        map_info.data, dtype=np.uint8, count=expected
-                    ).reshape((self.AI_H, self.AI_W, 4)).copy()
-                    buf.unmap(map_info)
-                    # RGBA 前 3 通道是 RGB，反转为 BGR（view，零拷贝，非连续）
-                    bgr_view = rgba[:, :, :3][:, :, ::-1]
-                    with self._frame_ready:
-                        self._frame_queue.append(
-                            (bgr_view, rgba, pts_ns, pts_latency_s)
-                        )
-                        self._frame_ready.notify()
-                    if self._cb_count == 1:
-                        print(f"[GstTee] 首帧 RGBA {rgba.shape} "
-                              f"(BGR view 零拷贝)", flush=True)
-                    return Gst.FlowReturn.OK
-                except Exception as e:
-                    if self._cb_count <= 2:
-                        print(f"[GstTee] 回调异常: {e}", flush=True)
-                    return Gst.FlowReturn.OK
+                def on_sample(s):
+                    try:
+                        if kind == "ai":
+                            self._ai_count += 1
+                            count = self._ai_count
+                        else:
+                            self._godot_count += 1
+                            count = self._godot_count
 
-            sink.connect("new-sample", on_sample)
+                        sample = s.emit("pull-sample")
+                        if not sample:
+                            return Gst.FlowReturn.OK
+                        buf = sample.get_buffer()
+                        pts_ns = buf.pts  # GStreamer PTS 时间戳（纳秒）
+                        pts_latency_s = self._estimate_pts_latency(pts_ns)
+                        result, map_info = buf.map(Gst.MapFlags.READ)
+                        if not result:
+                            return Gst.FlowReturn.OK
+                        # 每路唯一一次拷贝（GStreamer buffer 在 unmap 后失效）
+                        rgba = np.frombuffer(
+                            map_info.data, dtype=np.uint8, count=expected
+                        ).reshape((h, w, 4)).copy()
+                        buf.unmap(map_info)
+
+                        if kind == "ai":
+                            # RGBA 前 3 通道是 RGB，反转为 BGR（view，零拷贝，非连续）
+                            bgr_view = rgba[:, :, :3][:, :, ::-1]
+                            with self._frame_ready:
+                                self._ai_frame = (bgr_view, pts_ns, pts_latency_s)
+                                self._frame_ready.notify_all()
+                            if count == 1:
+                                print(f"[GstTee] AI 分支首帧 RGBA {rgba.shape} "
+                                      f"(BGR view 零拷贝)", flush=True)
+                        else:
+                            with self._frame_ready:
+                                self._godot_frame = (rgba, pts_ns)
+                                self._frame_ready.notify_all()
+                            if count == 1:
+                                print(f"[GstTee] Godot 分支首帧 RGBA {rgba.shape}",
+                                      flush=True)
+                        return Gst.FlowReturn.OK
+                    except Exception as e:
+                        self._err_count += 1
+                        if self._err_count <= 2:
+                            print(f"[GstTee] 回调异常({kind}): {e}", flush=True)
+                        return Gst.FlowReturn.OK
+                return on_sample
+
+            ai_sink.connect("new-sample", make_on_sample("ai", self.AI_W, self.AI_H))
+            godot_sink.connect("new-sample",
+                               make_on_sample("godot", self.GODOT_W, self.GODOT_H))
 
             # 监听总线
             bus = self._pipeline.get_bus()
@@ -423,27 +474,27 @@ class GstTeeCapture:
         return 0
 
     def read(self):
-        """返回 (True, (bgr_frame, rgba_frame)) 或 (False, (None, None))
+        """返回 (True, (bgr_640x360, rgba_1280x720)) 或 (False, (None, None))
 
-        bgr_frame 是 rgba_frame 的 view，零拷贝。
+        bgr_frame 来自 AI 分支，是其自身 rgba 的 view（零拷贝）；
+        rgba_frame 来自 Godot 分支，原生 1280×720。
+        两路各自只保留最新帧，等两路都就绪后一起取走。
         本地视频文件由 appsink 媒体时钟限帧，RTSP 摄像头不限帧。
         """
         with self._frame_ready:
             if not self._frame_ready.wait_for(
-                lambda: bool(self._frame_queue) or not self._opened,
+                lambda: (self._ai_frame is not None
+                         and self._godot_frame is not None) or not self._opened,
                 timeout=3.0,
             ):
                 return (False, (None, None))
-            if not self._frame_queue:
+            if self._ai_frame is None or self._godot_frame is None:
                 return (False, (None, None))
-            if self._is_file:
-                # 文件播放按顺序取帧，避免主动跳过已排队的视频帧。
-                bgr, rgba, _pts, pts_latency_s = self._frame_queue.popleft()
-            else:
-                # 实时流只取最新帧，避免网络抖动造成延迟累积。
-                bgr, rgba, pts_latency_s = None, None, None
-                while self._frame_queue:
-                    bgr, rgba, _pts, pts_latency_s = self._frame_queue.popleft()
+
+            bgr, _ai_pts, pts_latency_s = self._ai_frame
+            rgba = self._godot_frame[0]
+            self._ai_frame = None
+            self._godot_frame = None
             self.last_pts_latency_s = pts_latency_s
             return (True, (bgr, rgba))
 
@@ -492,10 +543,10 @@ class GstTeeCapture:
 
 def create_hw_decode_capture(source: str, fps: float = 30.0):
     """
-    硬件解码的视频捕获器（统一 RGBA）。
+    硬件解码的视频捕获器（统一 RGBA，tee 双路）。
     nvv4l2decoder → nvvidconv (GPU VIC 零 CPU)
-      └── RGBA 640×360 → appsink → BGR view → AI 推理
-                        └── RGBA 直出 → 共享内存 → Godot
+      ├── RGBA 640×360  → appsink → BGR view → AI 推理
+      └── RGBA 1280×720 → appsink → 共享内存 → Godot
 
     source: RTSP URL 或本地视频文件路径
     """
@@ -958,7 +1009,7 @@ class NvJpegEncoder:
       appsrc → nvvidconv (RGBA→I420, GPU VIC) → nvjpegenc (GPU) → appsink → JPEG bytes
 
     用法:
-        enc = NvJpegEncoder(width=640, height=360, fps=20, quality=80)
+        enc = NvJpegEncoder(width=1280, height=720, fps=20, quality=80)
         enc.start()
         jpeg_bytes = enc.encode(rgba_frame)  # numpy RGBA → JPEG bytes
         enc.stop()

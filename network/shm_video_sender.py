@@ -4,14 +4,14 @@
 使用 ShmSyncPy 的 mmap + semaphore，替换文件 I/O
 
 单路 RTSP 拉流，Python 端分叉：
-  GstTeeCapture → RGBA 640×360 帧
-    ├──→ AI 推理（BGR）
-    └──→ ShmVideoSender.send() → mmap → Godot
+  GstTeeCapture → AI 640×360（BGR）+ Godot 1280×720（RGBA）
+    ├──→ AI 推理（BGR 640×360）
+    └──→ ShmVideoSender.send() → mmap → Godot（RGBA 1280×720）
 
 协议：
   - 共享内存: /shm_input
   - 信号量:   /shm_input_sem  (Python post, Godot wait)
-  - 数据格式: [4字节 frame_id:u32 LE][RGBA 640×360×4]
+  - 数据格式: [4字节 frame_id:u32 LE][RGBA 1280×720×4]
 """
 
 import threading
@@ -19,8 +19,8 @@ import numpy as np
 
 from network.shm_sync import ShmSyncPy
 
-INPUT_W = 640
-INPUT_H = 360
+INPUT_W = 1280
+INPUT_H = 720
 INPUT_SIZE = INPUT_W * INPUT_H * 4  # RGBA
 
 
@@ -56,7 +56,7 @@ class ShmVideoSender:
             return False
 
     def send(self, rgba_frame: np.ndarray):
-        """接收 RGBA 640×360 帧（nvvidconv GPU 已转换）→ mmap + semaphore"""
+        """接收 RGBA 1280×720 帧（nvvidconv GPU 已转换）→ mmap + semaphore"""
         if not self._running or rgba_frame is None:
             if self._frame_count == 0:
                 print(f"[ShmVideoSender] send() 被跳过 running={self._running} "

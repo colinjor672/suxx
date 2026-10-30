@@ -9,7 +9,7 @@ from utils.thread_utils import set_thread_name
 class AsyncNavDataSender:
     def __init__(self, nav_server, mask_send_scale: float = 0.5,
              use_polygon_encoding: bool = True,
-             polygon_epsilon: float = 0.005):
+             polygon_epsilon: float = 0.0015):
         self.nav_server      = nav_server
         self.mask_send_scale = float(max(0.25, min(1.0, mask_send_scale)))
         self.use_polygon_encoding = use_polygon_encoding

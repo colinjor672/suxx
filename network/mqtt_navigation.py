@@ -91,6 +91,14 @@ def _extract_dcpa_alert(data: Mapping) -> dict | None:
         "alert_info": str(alert_info) if alert_info else "",
     }
 
+    # 避障服务回传的跟踪 ID，即我们发给 transport_tcp 的 ship_id
+    raw_id = entry.get("id")
+    if raw_id is not None:
+        try:
+            alert["target_id"] = int(raw_id)
+        except (TypeError, ValueError, OverflowError):
+            pass
+
     # 避障回传的目标像素框：四个值齐全且构成合法矩形才可用
     pixels = [
         _optional_float(entry.get(key))
@@ -476,7 +484,6 @@ class MqttNavigationClient:
             route = self.state.activate_mission(
                 mission,
                 float(timestamp),
-                now_epoch=now,
                 now_monotonic=self._monotonic_clock(),
             )
         except ValueError as exc:

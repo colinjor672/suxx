@@ -509,11 +509,9 @@ class RealtimeNavigationState:
         mission: Mapping,
         trigger_timestamp: float,
         *,
-        now_epoch: float | None = None,
         now_monotonic: float | None = None,
     ) -> EnuMissionRoute:
         trigger = float(trigger_timestamp)
-        epoch = time.time() if now_epoch is None else float(now_epoch)
         monotonic = time.monotonic() if now_monotonic is None else float(now_monotonic)
         if not math.isfinite(trigger) or trigger <= 0.0:
             raise ValueError("Avoidance command timestamp is invalid")
@@ -571,18 +569,12 @@ class RealtimeNavigationState:
                     f"action={action}"
                 )
 
-            elapsed_since_command = max(0.0, epoch - trigger)
-            initial_progress = (
-                initial_speed * elapsed_since_command
-                if initial_speed >= self.moving_threshold_mps
-                else 0.0
-            )
             self._route = route
             self._route_origin_lat_rad = aligned.latitude_rad
             self._route_origin_lon_rad = aligned.longitude_rad
             self._band_yaw_valid = False  # 新航线激活，重新锚定带子朝向
             self._trigger_timestamp = trigger
-            self._progress_m = min(route.length_m, initial_progress)
+            self._progress_m = 0.0
             self._speed_mps = initial_speed
             self._moving = initial_speed >= self.moving_threshold_mps
             self._last_speed_update_monotonic = monotonic
@@ -777,7 +769,7 @@ class RealtimeNavigationState:
         monotonic = time.monotonic() if now_monotonic is None else float(now_monotonic)
         self.update(now_epoch=epoch, now_monotonic=monotonic)
         with self._lock:
-            if self._route is not None and self._moving:
+            if self._route is not None:
                 return self._route.body_window(
                     self._progress_m,
                     self.lookahead_m,
