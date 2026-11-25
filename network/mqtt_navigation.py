@@ -16,7 +16,8 @@ except ImportError:  # Kept optional so the pure navigation logic remains testab
     mqtt = None
 
 
-DEFAULT_PREDICTION_TOPIC = "v1/11/prediction/result"
+DEFAULT_DCPA_TOPIC = "v1/11/prediction/dcpa"
+DEFAULT_AVOIDANCE_TOPIC = "v1/11/prediction/avoidance"
 DEFAULT_GNSS_TOPIC = "v1/11/sensor/gnss/gnss_01"
 
 
@@ -24,7 +25,8 @@ DEFAULT_GNSS_TOPIC = "v1/11/sensor/gnss/gnss_01"
 class MqttNavigationConfig:
     host: str = "127.0.0.1"
     port: int = 1883
-    prediction_topic: str = DEFAULT_PREDICTION_TOPIC
+    dcpa_topic: str = DEFAULT_DCPA_TOPIC
+    avoidance_topic: str = DEFAULT_AVOIDANCE_TOPIC
     gnss_topic: str = DEFAULT_GNSS_TOPIC
     client_prefix: str = "nav_visualizer"
     username: str | None = None
@@ -248,7 +250,11 @@ class MqttNavigationClient:
             raise ValueError("MQTT host cannot be empty")
         if not 1 <= config.port <= 65535:
             raise ValueError("MQTT port must be between 1 and 65535")
-        if not config.prediction_topic.strip() or not config.gnss_topic.strip():
+        if (
+            not config.dcpa_topic.strip()
+            or not config.avoidance_topic.strip()
+            or not config.gnss_topic.strip()
+        ):
             raise ValueError("MQTT topics cannot be empty")
         self.state = state
         self.config = config
@@ -258,16 +264,23 @@ class MqttNavigationClient:
         self._gnss_received_count = 0
         self._gnss_rejected_count = 0
         self._connect_fail_count = 0
-        # 上一次放行预测诊断打印的单调时刻（None 表示尚未打印过）
-        self._last_prediction_log_mono: float | None = None
+        # 各来源上一次放行诊断打印的单调时刻（None 表示尚未打印过）；
+        # dcpa 与 avoidance 各自独立节流，互不挤占打印窗口
+        self._last_log_mono: dict[str, float | None] = {
+            "dcpa": None,
+            "avoidance": None,
+        }
         # 上一次放行 ignored 错误打印的单调时刻（独立于正常日志的节流窗口）
         self._last_ignored_log_mono: float | None = None
         # 解析校验统计（每 30 秒汇总打印一次，用于确认 MQTT 数据解析是否成功）
         self._stats = {
-            "prediction_received": 0,
-            "prediction_parsed": 0,
-            "prediction_failed": 0,
-            "prediction_activated": 0,
+            "dcpa_received": 0,
+            "dcpa_ok": 0,
+            "dcpa_failed": 0,
+            "avoidance_received": 0,
+            "avoidance_parsed": 0,
+            "avoidance_failed": 0,
+            "avoidance_activated": 0,
             "gnss_ok": 0,
             "gnss_failed": 0,
             "decode_failed": 0,
@@ -292,7 +305,8 @@ class MqttNavigationClient:
         client.loop_start()
         print(
             f"[MQTT Nav] starting broker={self.config.host}:{self.config.port}; "
-            f"prediction={self.config.prediction_topic}; GNSS={self.config.gnss_topic}"
+            f"dcpa={self.config.dcpa_topic}; "
+            f"avoidance={self.config.avoidance_topic}; GNSS={self.config.gnss_topic}"
         )
 
     def _on_connect_fail(self, _client) -> None:
@@ -322,11 +336,12 @@ class MqttNavigationClient:
         if _reason_code_value(reason_code) != 0:
             print(f"[MQTT Nav] connection rejected: {reason_code}")
             return
-        client.subscribe(self.config.prediction_topic, qos=1)
+        client.subscribe(self.config.dcpa_topic, qos=1)
+        client.subscribe(self.config.avoidance_topic, qos=1)
         client.subscribe(self.config.gnss_topic, qos=0)
         print(
-            f"[MQTT Nav] subscribed {self.config.prediction_topic} and "
-            f"{self.config.gnss_topic}"
+            f"[MQTT Nav] subscribed {self.config.dcpa_topic}, "
+            f"{self.config.avoidance_topic} and {self.config.gnss_topic}"
         )
 
     @staticmethod
@@ -356,15 +371,20 @@ class MqttNavigationClient:
             except ValueError as exc:
                 self._stats["decode_failed"] += 1
                 raise exc
-            if message.topic == self.config.prediction_topic:
-                self._stats["prediction_received"] += 1
-                self._handle_prediction(data, envelope_ts)
+            if message.topic == self.config.avoidance_topic:
+                self._stats["avoidance_received"] += 1
+                self._handle_avoidance(data)
+            elif message.topic == self.config.dcpa_topic:
+                self._stats["dcpa_received"] += 1
+                self._handle_dcpa(data)
             elif message.topic == self.config.gnss_topic:
                 self._handle_gnss(data, envelope_ts)
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             # 按来源分类失败计数，供周期性校验报告汇总
-            if message.topic == self.config.prediction_topic:
-                self._stats["prediction_failed"] += 1
+            if message.topic == self.config.avoidance_topic:
+                self._stats["avoidance_failed"] += 1
+            elif message.topic == self.config.dcpa_topic:
+                self._stats["dcpa_failed"] += 1
             elif message.topic == self.config.gnss_topic:
                 self._stats["gnss_failed"] += 1
             # 高频失败同样刷屏：ignored 按独立 5 秒窗口节流，
@@ -390,48 +410,61 @@ class MqttNavigationClient:
             return
         self._last_report_mono = now_mono
         s = self._stats
-        pred_total = s["prediction_parsed"] + s["prediction_failed"]
-        pred_rate = (
-            f"{s['prediction_parsed'] / pred_total * 100:.0f}%"
-            if pred_total > 0
+        avoid_total = s["avoidance_parsed"] + s["avoidance_failed"]
+        avoid_rate = (
+            f"{s['avoidance_parsed'] / avoid_total * 100:.0f}%"
+            if avoid_total > 0
             else "n/a"
         )
         print(
-            f"[MQTT Nav] PARSE CHECK: prediction {s['prediction_parsed']}/{pred_total} "
-            f"parsed OK ({pred_rate}), activated={s['prediction_activated']}; "
+            f"[MQTT Nav] PARSE CHECK: avoidance {s['avoidance_parsed']}/{avoid_total} "
+            f"parsed OK ({avoid_rate}, recv={s['avoidance_received']}), "
+            f"activated={s['avoidance_activated']}; "
+            f"dcpa ok={s['dcpa_ok']} failed={s['dcpa_failed']} "
+            f"recv={s['dcpa_received']}; "
             f"GNSS ok={s['gnss_ok']} rejected={self._gnss_rejected_count} "
             f"failed={s['gnss_failed']}; "
             f"decode errors={s['decode_failed']}",
             flush=True,
         )
 
-    def _prediction_log_ready(self) -> bool:
-        """预测消息高频到达，诊断打印按 5 秒节流放行一批，避免刷屏。"""
+    def _log_ready(self, source: str) -> bool:
+        """预测消息高频到达，诊断打印按来源各 5 秒节流放行一批，避免刷屏。"""
         now_mono = self._monotonic_clock()
-        if (
-            self._last_prediction_log_mono is not None
-            and now_mono - self._last_prediction_log_mono
-            < self._PREDICTION_LOG_INTERVAL_S
-        ):
+        last = self._last_log_mono[source]
+        if last is not None and now_mono - last < self._PREDICTION_LOG_INTERVAL_S:
             return False
-        self._last_prediction_log_mono = now_mono
+        self._last_log_mono[source] = now_mono
         return True
 
-    def _handle_prediction(self, data: Mapping, envelope_ts: float | None) -> None:
+    def _handle_dcpa(self, data: Mapping) -> None:
+        """prediction/dcpa：只带碰撞结果，不再包含 positionList/avoidanceTrajectory。"""
+        if self._log_ready("dcpa"):
+            results = data.get("dcpaResults")
+            alerts = data.get("obstacleAlerts")
+            print(
+                f"[MQTT Nav] received dcpa: shipId={data.get('shipId')}, "
+                f"collisionAlert={data.get('collisionAlert')}, "
+                f"trajectoryLength_m={data.get('trajectoryLength_m')}, "
+                f"dcpaResults={len(results) if isinstance(results, list) else 'missing'}, "
+                f"obstacleAlerts={len(alerts) if isinstance(alerts, list) else 'missing'}",
+                flush=True,
+            )
+        # DCPA 目标与航线激活解耦：本主题独立到达，航线解析失败也不影响面板
+        self.state.set_dcpa_alert(_extract_dcpa_alert(data))
+        self._stats["dcpa_ok"] += 1
+
+    def _handle_avoidance(self, data: Mapping) -> None:
+        """prediction/avoidance：avoidanceTrajectory + shipId，用于激活导航带。"""
         # 诊断：打印收到的原始关键字段，确认消息到达与格式识别；
         # 按 5 秒节流放行一批打印，防止高频消息刷屏
-        log = self._prediction_log_ready()
+        log = self._log_ready("avoidance")
         if log:
-            position_list = data.get("positionList")
             avoidance = data.get("avoidanceTrajectory")
             print(
-                f"[MQTT Nav] received prediction: shipId={data.get('shipId')}, "
-                f"positionList={len(position_list) if isinstance(position_list, list) else 'missing'} pts, "
-                f"avoidanceTrajectory={len(avoidance) if isinstance(avoidance, list) else 'missing'} pts, "
-                f"trajectoryLength_m={data.get('trajectoryLength_m')}, "
-                f"collisionAlert={data.get('collisionAlert')}, "
-                f"dcpaResults={len(data.get('dcpaResults') or [])}, "
-                f"obstacleAlerts={len(data.get('obstacleAlerts') or [])}",
+                f"[MQTT Nav] received avoidance: shipId={data.get('shipId')}, "
+                f"avoidanceTrajectory="
+                f"{len(avoidance) if isinstance(avoidance, list) else 'missing'} pts",
                 flush=True,
             )
             # 打印完整 avoidanceTrajectory 数据（所有点的经纬度），供确认避障路径内容
@@ -449,10 +482,10 @@ class MqttNavigationClient:
                         print(f"  [{idx:02d}] {pt!r}", flush=True)
 
         mission, _, source = _normalise_prediction(data)
-        # 触发时刻 = 收到避障路径那一刻 GNSS 流的最新信封时间戳（envelope_ts）：
+        # 触发时刻 = 收到避障路径那一刻 GNSS 流的最新信封时间戳：
         # 与缓冲区样本同源同时刻，往前取 15 个点算初速必然命中。
-        # 屏蔽 result 里携带的所有时间戳（inputPosition.timestamp、positionList/
-        # avoidanceTrajectory 逐点 timestamp），一律不作为时间基准。
+        # 屏蔽 avoidance 报文里携带的时间戳（avoidanceTrajectory 逐点 timestamp），
+        # 一律不作为时间基准。
         # 缓冲区为空（开机未收到 GNSS）时回退本机时钟。
         now = self._clock()
         trigger = now
@@ -464,9 +497,7 @@ class MqttNavigationClient:
 
         timestamp = trigger
         # 走到这里 = 坐标解析通过，计为解析成功
-        self._stats["prediction_parsed"] += 1
-        # DCPA 目标与航线激活解耦：激活失败（如开机 GNSS 点不足）时该信息仍有效
-        self.state.set_dcpa_alert(_extract_dcpa_alert(data))
+        self._stats["avoidance_parsed"] += 1
 
         # 诊断：打印解析结果（坐标单位、触发时间戳、首点坐标）；同样按 5 秒节流
         first_point = mission["points"][0]
@@ -488,14 +519,14 @@ class MqttNavigationClient:
             )
         except ValueError as exc:
             # 已确认的策略：激活失败（如启动初期 15 个 GNSS 点不足）即放弃本条，
-            # 等待下一条预测消息（后端持续发布，其 input_ts 更新后自然满足）
+            # 等待下一条 avoidance 消息（后端持续发布，其 input_ts 更新后自然满足）
             if log:
                 print(
                     f"[MQTT Nav] parsed but NOT activated (source={source}): {exc}",
                     flush=True,
                 )
             raise
-        self._stats["prediction_activated"] += 1
+        self._stats["avoidance_activated"] += 1
         if log:
             print(
                 f"[MQTT Nav] activated navigation band ({source}): "

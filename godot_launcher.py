@@ -6,6 +6,7 @@ import time
 import threading
 
 from network.shm_sync import ShmSyncPy
+from utils.log_setup import LOG_DIR
 
 _godot_proc    = None
 _godot_log     = None
@@ -64,6 +65,8 @@ def _start_ffmpeg_mux(rtsp_url: str) -> bool:
         # 观看端中途加入最多多等 2s 出画面
         "-g", str(FRAME_FPS * 2),
         "-pix_fmt", "yuv420p",
+        # 640×360 被浏览器放大后偏软，编码前轻锐化找回边缘（只动亮度，避免色边）
+        "-vf", "unsharp=3:3:0.6:3:3:0.0",
     ]
 
     if is_rtmp:
@@ -327,7 +330,9 @@ def start_godot(godot_exe_path: str, rtsp_push_url: str = None,
     cmd = [godot_exe_path]
 
     print(f"[Godot] 启动: {godot_exe_path}")
-    _godot_log = open("/tmp/godot_stream.log", "w")
+    os.makedirs(LOG_DIR, exist_ok=True)
+    godot_log_path = os.path.join(LOG_DIR, "godot_stream.log")
+    _godot_log = open(godot_log_path, "w")
     _godot_proc = subprocess.Popen(
         cmd,
         cwd=work_dir,
@@ -364,7 +369,7 @@ def start_godot(godot_exe_path: str, rtsp_push_url: str = None,
 
     print(f"[Godot] PID={_godot_proc.pid}  窗口已在显示器上显示")
     print(f"[Godot] RTSP 推流: {push_url}")
-    print("[Godot] 日志: /tmp/godot_stream.log")
+    print(f"[Godot] 日志: {godot_log_path}")
     return _godot_proc
 
 

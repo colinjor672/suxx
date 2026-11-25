@@ -10,18 +10,14 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from utils.log_setup import get_rotating_logger
+
 
 EARTH_RADIUS_M = 6378137.0
 
-# 导航日志统一写入 realtime_navigation.log（不再打印到终端）；
+# 导航日志统一写入 log/realtime_navigation.log（按天滚动，保留 5 天）；
 # mqtt_navigation.py 通过 nav_log 复用同一个 logger 与文件。
-_NAV_LOGGER = logging.getLogger("realtime_navigation")
-if not _NAV_LOGGER.handlers:
-    _handler = logging.FileHandler("realtime_navigation.log", encoding="utf-8")
-    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    _NAV_LOGGER.addHandler(_handler)
-    _NAV_LOGGER.setLevel(logging.INFO)
-_NAV_LOGGER.propagate = False
+_NAV_LOGGER = get_rotating_logger("realtime_navigation", "realtime_navigation.log")
 
 
 def nav_log(message: str, *, level: int = logging.INFO) -> None:

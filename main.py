@@ -15,6 +15,15 @@ import sys
 import stat
 import math
 
+from utils.log_setup import LOG_DIR, RETENTION_DAYS, setup_logging
+
+# 尽早接管 stdout/stderr：启动日志以及后续 import 的报错都会写入 log/main.log
+log = setup_logging()
+log.info("[启动] main.py 启动 | pid=%s cwd=%s", os.getpid(), os.getcwd())
+log.info("[启动] 命令行: %s", " ".join(sys.argv))
+log.info("[启动] 日志文件: %s（按天滚动，保留 %d 天）",
+         os.path.join(LOG_DIR, "main.log"), RETENTION_DAYS)
+
 import cv2
 
 from env_setup import setup_environment, setup_onnxruntime_cuda
@@ -26,7 +35,7 @@ from godot_launcher import start_godot, stop_godot, push_is_alive, restart_push
 def parse_args():
     p = argparse.ArgumentParser(description="Navigation")
     #cap = cv2.VideoCapture(input_video)  # input_video 是 "video.mp4" 文件
-    p.add_argument("--input", default="rtsp://admin:gzsia2011@192.168.3.171:554/Streaming/Channels/101")#rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101
+    p.add_argument("--input", default="rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101")#rtsp://admin:gzsia2011@192.168.1.164:554/Streaming/Channels/101
     p.add_argument("--output", default="output_nav.mp4")
     p.add_argument("--seg",    default="best_fp16.engine")
     p.add_argument("--device", default="cuda")
@@ -49,7 +58,7 @@ def parse_args():
     p.add_argument("--save-video",      action="store_true")
 
     p.add_argument("--nav-send-every",    type=int,   default=2)
-    p.add_argument("--mask-send-scale",   type=float, default=0.5)
+    p.add_argument("--mask-send-scale",   type=float, default=1.0)
     p.add_argument("--show-scale",        type=float, default=0.5)
     p.add_argument("--playback-fps", type=float, default=0.0,
                    help="处理帧率上限；0 表示本地文件使用源帧率、RTSP 不限帧")
@@ -71,8 +80,10 @@ def parse_args():
                    help="本地 MQTT Broker 地址")
     p.add_argument("--mqtt-port", type=int, default=1890,
                    help="本地 MQTT Broker 端口")
-    p.add_argument("--prediction-topic", default="v1/11/prediction/result",
-                   help="避障服务路径结果 MQTT Topic")
+    p.add_argument("--dcpa-topic", default="v1/11/prediction/dcpa",
+                   help="避障服务 DCPA 结果 MQTT Topic")
+    p.add_argument("--avoidance-topic", default="v1/11/prediction/avoidance",
+                   help="避障服务避障轨迹 MQTT Topic")
     p.add_argument("--gnss-topic", default="v1/11/sensor/gnss/gnss_01",
                    help="实时船只经纬度 MQTT Topic")
     p.add_argument("--mqtt-username", default=os.environ.get("MQTT_USERNAME"))
@@ -266,6 +277,15 @@ def main():
         pass
 
     args = parse_args()
+    # 只记录关键参数，避免把 RTSP/MQTT/Redis 密码写进日志
+    log.info(
+        "[启动] 推流模式=%s Godot=%s MQTT=%s:%s 船ID=%s",
+        args.push_mode,
+        "关闭" if args.no_godot else args.godot,
+        args.mqtt_host,
+        args.mqtt_port,
+        args.ship_id,
+    )
 
     # 现场排查：只看 Redis 通不通、有没有数据，不启动任何推理/推流组件
     if args.bridge_alert_probe:
@@ -290,7 +310,11 @@ def main():
         raise ValueError("--mqtt-host 不能为空")
     if not 1 <= args.mqtt_port <= 65535:
         raise ValueError("--mqtt-port 必须在 1~65535 范围内")
-    if not args.prediction_topic.strip() or not args.gnss_topic.strip():
+    if (
+        not args.dcpa_topic.strip()
+        or not args.avoidance_topic.strip()
+        or not args.gnss_topic.strip()
+    ):
         raise ValueError("MQTT Topic 不能为空")
 
     cv2.setNumThreads(args.cpu_threads)
@@ -379,7 +403,8 @@ def main():
             nav_heading_offset=args.nav_heading_offset,
             mqtt_host=args.mqtt_host,
             mqtt_port=args.mqtt_port,
-            prediction_topic=args.prediction_topic,
+            dcpa_topic=args.dcpa_topic,
+            avoidance_topic=args.avoidance_topic,
             gnss_topic=args.gnss_topic,
             mqtt_username=args.mqtt_username,
             mqtt_password=args.mqtt_password,

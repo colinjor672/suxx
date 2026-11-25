@@ -263,6 +263,42 @@ class GstVideoCapture:
 # GStreamer Tee 双路捕获：nvvidconv GPU 分叉，零 CPU 转换
 # ═══════════════════════════════════════════════════════════════
 
+# RTSP 显式硬解链，键为 ffprobe 报出的 codec_name。
+# H.264/H.265 必须显式挂 nvv4l2decoder：交给 decodebin 时它常选 avdec_h264，
+# 出的是系统内存帧，而 nvvidconv 只接 NVMM，结果是 caps 协商不完、管线停在
+# PAUSED 且一帧不出（appsink 侧表现为 read 超时返回 False）。
+_RTSP_EXPLICIT_DECODERS = {
+    "h264": "rtph264depay ! h264parse ! nvv4l2decoder ",
+    "hevc": "rtph265depay ! h265parse ! nvv4l2decoder ",
+    "h265": "rtph265depay ! h265parse ! nvv4l2decoder ",
+}
+
+
+def _probe_rtsp_codec(source: str, timeout: float = 5.0):
+    """探测 RTSP 流的视频编码名，探不到返回 None。
+
+    ffprobe 只做 DESCRIBE/SETUP 就退出，不会占用后续管线；探测失败时调用方
+    退回 decodebin（即平台 MJPEG 源那条已验证的路径）。
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-rtsp_transport", "tcp", "-v", "error",
+             "-select_streams", "v:0", "-show_entries", "stream=codec_name",
+             "-of", "csv=p=0", source],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except Exception as e:
+        print(f"[GstTee] 编码探测失败（ffprobe 不可用？）: {e}", flush=True)
+        return None
+
+    text = (out.stdout or "").strip()
+    if not text:
+        return None
+    return text.splitlines()[0].strip().lower() or None
+
+
 class GstTeeCapture:
     """
     GStreamer 双路捕获：nvvidconv (VIC) 分两路出 RGBA，零 CPU 色彩转换
@@ -318,18 +354,23 @@ class GstTeeCapture:
             Gst.init(None)
 
             if is_rtsp:
-                # 平台这个源经 decodebin 出的是 GPU/NVMM 帧（日志有 NVMMLITE_NVVIDEODEC），
-                # 所以缩放只能用 nvvidconv；换成 videoscale ! videoconvert 的纯 CPU 链会
-                # 立刻 "Delayed linking failed" 起不来（已实测，别再试）。
-                # protocols=4 强制 RTSP 走 TCP，location 必须加引号（URL 里有 @ 和 :）。
-                # TCP 传输无乱序，jitterbuffer 只需吸收小抖动：latency 500→50，
-                # 并开 drop-on-latency，否则稳态就有 ~200ms 的固定排队延迟。
-                # tee 后两路各自 queue：AI 640×360 给推理，Godot 1280×720 给显示，
-                # 缩放都在 VIC 上做，CPU 只承担一次 buffer 拷贝。
+                # 按实际编码分叉：H.264/H.265 走显式 nvv4l2decoder，其余（平台 MJPEG
+                # 源经 decodebin 出 NVMM 硬解，日志有 NVMMLITE_NVVIDEODEC）走 decodebin。
+                # 平台那条换成 videoscale ! videoconvert 的纯 CPU 链会立刻
+                # "Delayed linking failed" 起不来（已实测，别再试）。
+                # protocols=4 在本机 GStreamer 上就是 TCP（HTTP 是 0x10），location
+                # 必须加引号（URL 里有 @ 和 :）。
+                # jitterbuffer 退回保守值：drop-on-latency 会丢掉还没同步好的 IDR，
+                # 自写推流端的 RTCP SR 时间锚点稍有偏差就整段零帧；延迟由下游两路
+                # leaky queue 兜住，不靠 jitterbuffer 丢帧。
+                codec   = _probe_rtsp_codec(source)
+                decoder = _RTSP_EXPLICIT_DECODERS.get(codec or "")
+                print(f"[GstTee] RTSP 编码探测: {codec or '未知'} → "
+                      f"{'显式 nvv4l2decoder' if decoder else 'decodebin'}")
+
                 pipeline_str = (
-                    f'rtspsrc location="{source}" protocols=4 latency=50 '
-                    "drop-on-latency=true ! "
-                    "decodebin ! tee name=t "
+                    f'rtspsrc location="{source}" protocols=4 latency=200 ! '
+                    f'{decoder or "decodebin "}! tee name=t '
                     "t. ! queue leaky=downstream max-size-buffers=2 "
                     "max-size-bytes=0 max-size-time=0 ! "
                     f"nvvidconv ! video/x-raw,format=RGBA,"

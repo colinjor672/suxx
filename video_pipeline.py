@@ -36,6 +36,7 @@ from infer.async_seg import AsyncSegInferencer
 from infer.yolo_detector import AsyncYOLODetector
 
 from network.shm_video_sender import ShmVideoSender
+from network.shm_mask_sender import ShmMaskSender
 from network.nav_sender import AsyncNavDataSender
 from network.yolo_sender import YoloSender
 from network.fusion_receiver import FusionReceiver
@@ -74,7 +75,7 @@ def process_video(input_video, output_video,
                   yolo_send_port=9000,
                   save_video=False,
                   nav_send_every=3,
-                  mask_send_scale=0.5,
+                  mask_send_scale=1.0,
                   nav_draw_distance=30.0,
                   nav_scale=0.5,
                   nav_projection_hz=10.0,
@@ -83,7 +84,8 @@ def process_video(input_video, output_video,
                   nav_heading_offset=0.0,
                   mqtt_host="127.0.0.1",
                   mqtt_port=1883,
-                  prediction_topic="v1/11/prediction/result",
+                  dcpa_topic="v1/11/prediction/dcpa",
+                  avoidance_topic="v1/11/prediction/avoidance",
                   gnss_topic="v1/11/sensor/gnss/gnss_01",
                   mqtt_username=None,
                   mqtt_password=None,
@@ -271,6 +273,11 @@ def process_video(input_video, output_video,
     send_w     = max(1, int(width  * send_scale))
     send_h     = max(1, int(height * send_scale))
 
+    shm_mask_sender = None
+    if enable_video_stream:
+        shm_mask_sender = ShmMaskSender(send_w, send_h)
+        shm_mask_sender.start()
+
     navigation_state = RealtimeNavigationState(
         lookahead_m=nav_draw_distance,
         sample_spacing_m=0.25,
@@ -324,7 +331,8 @@ def process_video(input_video, output_video,
     mqtt_config = MqttNavigationConfig(
         host=mqtt_host,
         port=mqtt_port,
-        prediction_topic=prediction_topic,
+        dcpa_topic=dcpa_topic,
+        avoidance_topic=avoidance_topic,
         gnss_topic=gnss_topic,
         username=mqtt_username,
         password=mqtt_password,
@@ -370,6 +378,52 @@ def process_video(input_video, output_video,
     print(f"开始处理...\n")
     t_start = time.time()
 
+    reconnect_stop = threading.Event()
+    reconnect_done = threading.Event()
+    reconnect_lock = threading.Lock()
+    reconnect_result = None
+    read_failure_started = None
+
+    def reconnect_capture():
+        nonlocal reconnect_result
+        attempt = 0
+        while not reconnect_stop.is_set():
+            attempt += 1
+            print(f"[Pipeline] RTSP 后台重连第 {attempt} 次", flush=True)
+            candidate = None
+            try:
+                candidate = create_hw_decode_capture(input_video)
+                if candidate is None or not candidate.isOpened():
+                    raise RuntimeError("无法打开视频流")
+                if isinstance(candidate, cv2.VideoCapture):
+                    candidate.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+                ret, result = candidate.read()
+                drain_deadline = time.monotonic() + 0.2
+                while ret and time.monotonic() < drain_deadline:
+                    newer_ret, newer_result = candidate.read()
+                    if not newer_ret:
+                        ret, result = False, None
+                        break
+                    result = newer_result
+                if not ret:
+                    raise RuntimeError("已连接但未读到新帧")
+
+                with reconnect_lock:
+                    if reconnect_stop.is_set():
+                        candidate.release()
+                        return
+                    reconnect_result = (candidate, result)
+                    reconnect_done.set()
+                print("[Pipeline] RTSP 重连成功，已丢弃重连缓冲旧帧", flush=True)
+                return
+            except Exception as exc:
+                if candidate is not None:
+                    candidate.release()
+                if not reconnect_stop.is_set():
+                    print(f"[Pipeline] RTSP 重连失败: {exc}；10 秒后重试", flush=True)
+            reconnect_stop.wait(10.0)
+
     navigation_state.start()
     try:
         mqtt_navigation.start()
@@ -382,11 +436,22 @@ def process_video(input_video, output_video,
         _loop_started = False
         while True:
             t_frame = time.time()
-            # Wait before capture so an RTSP source is sampled at the newest
-            # available frame after the pacing interval.
-            if frame_pacer is not None:
-                frame_pacer.wait()
-            ret, result = cap.read()
+            if cap is None:
+                if not reconnect_done.wait(timeout=0.2):
+                    continue
+                with reconnect_lock:
+                    cap, result = reconnect_result
+                    reconnect_result = None
+                reconnect_done.clear()
+                ret = True
+                read_failure_started = None
+                print("[Pipeline] 视频处理已恢复", flush=True)
+            else:
+                # Wait before capture so an RTSP source is sampled at the newest
+                # available frame after the pacing interval.
+                if frame_pacer is not None:
+                    frame_pacer.wait()
+                ret, result = cap.read()
 
             # GstTeeCapture 用 PTS 估算了 RTSP 源"编码端出图 → 解码出帧"的耗时，
             # 把帧时间戳向前回拨这段时间，下游按时间戳算出的延迟即覆盖解码前的全链路。
@@ -399,8 +464,32 @@ def process_video(input_video, output_video,
 
             frame_timestamp = time.time() - gst_decode_s
             if not ret:
-                print(f"[Pipeline] cap.read() 返回 False，主循环退出 (frame_idx={frame_idx})", flush=True)
-                break
+                if not is_rtsp:
+                    print(f"[Pipeline] cap.read() 返回 False，主循环退出 (frame_idx={frame_idx})", flush=True)
+                    break
+
+                now = time.monotonic()
+                if read_failure_started is None:
+                    read_failure_started = now
+                    print("[Pipeline] RTSP 读取失败，连续失败超过 10 秒后将后台重连", flush=True)
+                    time.sleep(0.1)
+                    continue
+                if now - read_failure_started < 10.0:
+                    time.sleep(0.1)
+                    continue
+
+                print("[Pipeline] RTSP 已连续读取失败超过 10 秒，开始后台重连；其他模块继续运行", flush=True)
+                cap.release()
+                cap = None
+                reconnect_done.clear()
+                Thread(
+                    target=reconnect_capture,
+                    name="RTSPReconnect",
+                    daemon=True,
+                ).start()
+                continue
+
+            read_failure_started = None
 
             # 兼容两种捕获模式
             if isinstance(result, tuple) and len(result) == 2:
@@ -485,6 +574,13 @@ def process_video(input_video, output_video,
                     cached_water_send = water_small_np
                     cached_bridge_send = bridge_small_np
 
+                    if shm_mask_sender:
+                        shm_mask_sender.send(
+                            water_small_np,
+                            bridge_small_np,
+                            int(seg_fid),
+                        )
+
                     if need_render and save_video:
                         cached_water_large = cuda_resize(
                             water_small_np,
@@ -538,8 +634,8 @@ def process_video(input_video, output_video,
                 )
                 dcpa_snap_log_ts = _snap_now
 
-            # ★ 步骤 4：TCP 导航数据发送
-            # 只在新的分割帧出现后发送一次，避免重复提取同一张 mask 的 polygon
+            # ★ 步骤 4：TCP 导航元数据发送（掩码已由 shm_mask 独立发送）
+            # 与最新分割结果保持同一帧号和时间戳
             has_new_nav_mask = (
                 last_processed_seg_fid > 0
                 and last_processed_seg_fid != last_sent_nav_seg_fid
@@ -560,8 +656,6 @@ def process_video(input_video, output_video,
                     frame_id    = frame_idx,
                     timestamp   = video_time,
 
-                    water_mask  = cached_water_send,
-                    bridge_mask = cached_bridge_send,
                     ships_data  = ships_final,
                     ship_src_w  = width,
                     ship_src_h  = height,
@@ -684,11 +778,20 @@ def process_video(input_video, output_video,
         print("\n用户中断 (Ctrl+C)")
     finally:
         print("\n正在释放资源...")
-        cap.release()
+        with reconnect_lock:
+            reconnect_stop.set()
+            pending_reconnect = reconnect_result
+            reconnect_result = None
+        if cap is not None:
+            cap.release()
+        if pending_reconnect is not None:
+            pending_reconnect[0].release()
         if async_seg:
             async_seg.shutdown()
         if shm_video_sender:
             shm_video_sender.stop()
+        if shm_mask_sender:
+            shm_mask_sender.stop()
         if nav_sender:
             nav_sender.shutdown()
         mqtt_navigation.stop()

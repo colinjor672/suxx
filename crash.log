@@ -1,0 +1,476 @@
+['/home/jetson/code/Visualization', '/home/jetson/yahboom_ws/install/text_chat/lib/python3.10/site-packages', '/home/jetson/yahboom_ws/install/largemodel/lib/python3.10/site-packages', '/home/jetson/yahboom_ws/install/interfaces/local/lib/python3.10/dist-packages', '/home/jetson/yahboom_ws/install/camera/lib/python3.10/site-packages', '/opt/ros/humble/lib/python3.10/site-packages', '/opt/ros/humble/local/lib/python3.10/dist-packages', '/usr/local/lib/python3.10/site-packages', '/home/jetson/code/Visualization', '/usr/lib/python310.zip', '/usr/lib/python3.10', '/usr/lib/python3.10/lib-dynload', '/home/jetson/code/Visualization/venv/lib/python3.10/site-packages', '/home/jetson/.local/lib/python3.10/site-packages', '/usr/local/lib/python3.10/dist-packages', '/usr/local/lib/python3.10/dist-packages/jetcam-0.0.0-py3.10.egg', '/usr/lib/python3/dist-packages', '/usr/lib/python3.10/dist-packages', '/home/jetson/code/Visualization']
+✓ 已注入 PyTorch CUDA/cuDNN 库: /usr/local/lib/python3.10/dist-packages/torch/lib
+CPU 工作线程上限: 1
+[EasyDarwin] 已在运行，跳过启动
+[NvJpeg] 初始化 GPU 硬件 JPEG 编码器...
+[NvJpeg] ✓ GPU JPEG 编码 640×360 @ 20fps, quality=80
+NvMMLiteBlockCreate : Block : BlockType = 1 
+[10/12/2026-14:20:24] [TRT] [W] Using an engine plan file across different models of devices is not recommended and is likely to affect performance or even cause errors.
+[FFmpeg] RTMP 分发不支持 MJPEG，自动切换 libx264 转码
+[FFmpeg] libx264 转码 → RTMP/FLV rtmp://192.168.3.120:21935/live/stream_5?sign=CWAIkFXz9I
+[ShmSync] 等待 Godot 创建共享内存...
+[Godot] 启动: /home/jetson/code/Visualization/Visualization1.arm64
+[ShmSync] 等待 Godot 创建 shm_frame...
+[ShmSyncPy] Reader 'shm_frame' 已打开, 921600 字节, semaphore OK
+[ShmSync] Reader 已连接 shm_frame (mmap+semaphore)
+[Godot] PID=20080  窗口已在显示器上显示
+[Godot] RTSP 推流: rtmp://192.168.3.120:21935/live/stream_5?sign=CWAIkFXz9I
+[Godot] 日志: /tmp/godot_stream.log
+
+推理尺寸  : 768×432
+掩码策略  : 每 5 帧推理一次，其余复用
+本地渲染  : 关(最高性能)
+Python绘制: 曲线=关 掩码=关
+视频流    : 单路RTSP→GStreamer解码→分叉 (AI推理+ShmVideoSender→Godot)
+[Server] ✓ 导航数据端口     : 0.0.0.0:8765
+[Server] ✓ 视频帧端口       : 0.0.0.0:8766
+TCP 服务器已启动:
+  导航数据: tcp://0.0.0.0:8765
+[Server] Unity [导航数据] 客户端已连接: ('127.0.0.1', 37734)
+加载 TRT 分割模型: best_fp16.engine (432×768)
+✓ TRTInferencer 初始化完成
+[AsyncYOLO] ✓ 后台推理线程已启动 (conf=0.45, iou=0.45, detect_every=2)
+[YoloSender] 客户端模式，目标: 127.0.0.1:9000
+[YoloSender] → transport_tcp 127.0.0.1:9000
+[GstUtils] ── 硬件加速能力 ──
+  平台          : Orin Nano
+  GStreamer     : ✓
+  nvv4l2decoder : ✓ 硬件解码 (零 CPU)
+  nvvidconv     : ✓ 硬件色彩转换 (零 CPU)
+  NVENC         : ✗ (Orin Nano 无此单元)
+  CUDA resize   : ✗
+  nvJPEG        : ✗
+  CPU 编码方案   : x264enc (speed-preset=ultrafast)
+[GstUtils] ✓ RTSP 硬解: nvv4l2decoder → nvvidconv (零 CPU)
+[GstTee] 状态: null → ready
+[GstTee] 状态: ready → paused
+NvMMLiteOpen : Block : BlockType = 277 
+NvMMLiteBlockCreate : Block : BlockType = 277 
+[GstTee] 状态: paused → playing
+[GstTee] 首帧 RGBA (360, 640, 4) (BGR view 零拷贝)
+RTSP 流: 640×360 @ 30.0fps
+[ShmSyncPy] Writer 'shm_input' 已打开, 921600 字节, semaphore OK
+[ShmVideoSender] mmap+semaphore 已启动 → 640×360 RGBA
+[10/12/2026-14:20:26] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[AsyncNavSender] ✓ 使用发送方法: nav_server.send_prepared_nav()
+✓ TRT 预热完成
+[BridgeAlert] ✗ Redis 不可用（ResponseError: unknown command 'HELLO'）→ 全程使用预存桥梁库
+[BridgeWarning] ✓ 引擎就绪：坐标空间 320×180（与 nav 包一致），预存桥梁库 8 座，警戒线经 8765 下发 Godot
+[AsyncSeg] ✓ 分割推理后台线程已启动
+视频: 640×360 @ 30.0fps, 共 0 帧
+[AsyncSeg] ✓ 推理完全异步 | 主循环零等待
+开始处理...
+
+[MQTT Nav] starting broker=192.168.3.43:1883; prediction=v1/11/prediction/result; GNSS=v1/11/sensor/gnss/gnss_01
+[Pipeline] 主循环首帧 frame_idx=1 AI=(360, 640, 3) Godot=(360, 640, 4)
+[ShmVideoSender] send() 首帧 shape=(360, 640, 4) dtype=uint8 contiguous=True
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav] subscribed v1/11/prediction/result and v1/11/sensor/gnss/gnss_01
+[MQTT Nav][ts-dbg] envelope_ts=1791786026.424 sample_ts=None
+[10/12/2026-14:20:26] [TRT] [I] The logger passed into createInferRuntime differs from one already provided for an existing builder, runtime, or refitter. Uses of the global logger, returned by nvinfer1::getLogger(), will return the existing value.
+[10/12/2026-14:20:26] [TRT] [I] Loaded engine size: 12 MiB
+[10/12/2026-14:20:26] [TRT] [W] Using an engine plan file across different models of devices is not recommended and is likely to affect performance or even cause errors.
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=0 pts, trajectoryLength_m=277.48913379606086, collisionAlert=0, dcpaResults=0, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (0 pts):
+[MQTT Nav] ignored v1/11/prediction/result: Prediction result needs a non-empty path array
+[10/12/2026-14:20:26] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +1, GPU +41, now: CPU 2, GPU 101 (MiB)
+[ShmVideoSender] 已写 100 帧 (mmap+semaphore)
+  帧   100/0 | avg 39.6ms (25.2fps) | gst解码 19.4ms | ships=0
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=0 pts, trajectoryLength_m=251.64834275449647, collisionAlert=0, dcpaResults=0, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (0 pts):
+[MQTT Nav] ignored v1/11/prediction/result: Prediction result needs a non-empty path array
+[NvJpeg] 已编码 200 帧
+[Reader] 已推送 200 帧 (丢弃 1, 编码失败 0)
+[ShmVideoSender] 已写 200 帧 (mmap+semaphore)
+  帧   200/0 | avg 40.0ms (25.0fps) | gst解码 19.0ms | ships=0
+[MQTT Nav] received GNSS=100 latest_ts=1791786036.325
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav][ts-dbg] envelope_ts=1791786036.424 sample_ts=None
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=130 pts, trajectoryLength_m=251.3398094501937, collisionAlert=1, dcpaResults=1, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (130 pts):
+  [00] lat=22.745015477333332, lon=113.5938724735
+  [01] lat=22.745034741703225, lon=113.59386961502543
+  [02] lat=22.745054006073122, lon=113.59386675655085
+  [03] lat=22.745073284006445, lon=113.59386401429568
+  [04] lat=22.745092597785973, lon=113.59386157919178
+  [05] lat=22.745111911565505, lon=113.59385914408789
+  [06] lat=22.74513124812767, lon=113.59385694197051
+  [07] lat=22.74515060340414, lon=113.59385493123494
+  [08] lat=22.745169958680613, lon=113.59385292049936
+  [09] lat=22.745189341600696, lon=113.59385125992199
+  [10] lat=22.745208730444414, lon=113.59384967437852
+  [11] lat=22.745228121800267, lon=113.59384813058422
+  [12] lat=22.745247536267776, lon=113.59384697088244
+  [13] lat=22.745266950735285, lon=113.59384581118066
+  [14] lat=22.74528637178568, lon=113.59384481030277
+  [15] lat=22.745305803923042, lon=113.59384407691779
+  [16] lat=22.7453252360604, lon=113.59384334353281
+  [17] lat=22.745344674479835, lon=113.5938428861943
+  [18] lat=22.745364116325856, lon=113.59384257942659
+  [19] lat=22.745383558171877, lon=113.59384227265888
+  [20] lat=22.745403001624652, lon=113.59384235916407
+  [21] lat=22.745422445214174, lon=113.59384247913931
+  [22] lat=22.74544188758362, lon=113.59384268278001
+  [23] lat=22.74546132495076, lon=113.59384322944904
+  [24] lat=22.745480762317904, lon=113.59384377611806
+  [25] lat=22.745500193009416, lon=113.59384452347878
+  [26] lat=22.74551961619085, lon=113.59384549661765
+  [27] lat=22.745539039372286, lon=113.59384646975651
+  [28] lat=22.745558446054847, lon=113.59384776036015
+  [29] lat=22.745577847093056, lon=113.59384915957015
+  [30] lat=22.745597247541234, lon=113.59385056712325
+  [31] lat=22.745616618487773, lon=113.59385239183116
+  [32] lat=22.745635989434316, lon=113.59385421653906
+  [33] lat=22.745655349196213, lon=113.59385616617354
+  [34] lat=22.745674682114966, lon=113.59385841563177
+  [35] lat=22.74569401503372, lon=113.59386066509
+  [36] lat=22.745713321825, lon=113.5938631555489
+  [37] lat=22.745732608795432, lon=113.59386582883589
+  [38] lat=22.745751895765864, lon=113.59386850212286
+  [39] lat=22.745771137333325, lon=113.59387153183222
+  [40] lat=22.745790370453722, lon=113.59387462785273
+  [41] lat=22.745809596311805, lon=113.59387777345736
+  [42] lat=22.745828767702516, lon=113.59388129094297
+  [43] lat=22.745847939093228, lon=113.59388480842858
+  [44] lat=22.745867083196078, lon=113.59388849062951
+  [45] lat=22.745886185002743, lon=113.59389242813914
+  [46] lat=22.74590528680941, lon=113.59389636564877
+  [47] lat=22.745924337009477, lon=113.59390058209898
+  [48] lat=22.745943361406248, lon=113.59390493801948
+  [49] lat=22.745962385803015, lon=113.59390929393997
+  [50] lat=22.74598133000775, lon=113.59391404197932
+  [51] lat=22.746000269200483, lon=113.59391881452609
+  [52] lat=22.746019188342313, lon=113.5939236765117
+  [53] lat=22.746038034571782, lon=113.59392886372947
+  [54] lat=22.746056880801248, lon=113.59393405094724
+  [55] lat=22.74607567767561, lon=113.59393944039337
+  [56] lat=22.746094423220665, lon=113.59394504015698
+  [57] lat=22.74611316876572, lon=113.59395063992059
+  [58] lat=22.746131831443954, lon=113.59395655340606
+  [59] lat=22.746150468624705, lon=113.59396256342133
+  [60] lat=22.746169102068343, lon=113.59396858665667
+  [61] lat=22.74618764395279, lon=113.59397493378344
+  [62] lat=22.746206185837234, lon=113.59398128091023
+  [63] lat=22.746224703392365, lon=113.5939877097505
+  [64] lat=22.746243167727123, lon=113.59399431733904
+  [65] lat=22.746261632061884, lon=113.59400092492757
+  [66] lat=22.74628006336572, lon=113.59400763940599
+  [67] lat=22.746298471547913, lon=113.59401442870731
+  [68] lat=22.746316879730102, lon=113.59402121800863
+  [69] lat=22.746335260010948, lon=113.59402809551406
+  [70] lat=22.74635363585294, lon=113.59403498705196
+  [71] lat=22.746372010670697, lon=113.59404188179484
+  [72] lat=22.746390379050375, lon=113.59404879668335
+  [73] lat=22.746408747430053, lon=113.59405571157187
+  [74] lat=22.74642712285723, lon=113.59406260435341
+  [75] lat=22.746445508352267, lon=113.59406946555355
+  [76] lat=22.746463893847302, lon=113.5940763267537
+  [77] lat=22.746482306866795, lon=113.59408310032549
+  [78] lat=22.7465007324689, lon=113.59408983383864
+  [79] lat=22.746519158071003, lon=113.59409656735177
+  [80] lat=22.746537641697444, lon=113.59410311109151
+  [81] lat=22.746556127692227, lon=113.5941096470854
+  [82] lat=22.746574631824977, lon=113.59411612140005
+  [83] lat=22.74659319490612, lon=113.59412239525717
+  [84] lat=22.74661175798726, lon=113.59412866911431
+  [85] lat=22.746630366738344, lon=113.59413477953464
+  [86] lat=22.746649019402835, lon=113.59414073280419
+  [87] lat=22.746667672067325, lon=113.59414668607374
+  [88] lat=22.74668640126665, lon=113.59415234754483
+  [89] lat=22.74670515151305, lon=113.59415792877135
+  [90] lat=22.746723907705327, lon=113.5941634855373
+  [91] lat=22.74674275903155, lon=113.5941686509341
+  [92] lat=22.746761610357776, lon=113.5941738163309
+  [93] lat=22.746780495133077, lon=113.59417883124034
+  [94] lat=22.74679944680654, lon=113.59418354517513
+  [95] lat=22.746818398480002, lon=113.59418825910991
+  [96] lat=22.74683740843351, lon=113.59419268208856
+  [97] lat=22.746856455987047, lon=113.59419691735359
+  [98] lat=22.746875503540583, lon=113.5942011526186
+  [99] lat=22.746894629040852, lon=113.59420494898707
+  [100] lat=22.746913764934018, lon=113.59420868683601
+  [101] lat=22.746932913138636, lon=113.59421234501413
+  [102] lat=22.7469521275173, lon=113.59421557496157
+  [103] lat=22.746971341895964, lon=113.59421880490899
+  [104] lat=22.74699058522349, lon=113.5942218146177
+  [105] lat=22.74700986671087, lon=113.5942245340117
+  [106] lat=22.747029148198244, lon=113.5942272534057
+  [107] lat=22.74704846848901, lon=113.59422961562274
+  [108] lat=22.747067804947847, lon=113.59423182901602
+  [109] lat=22.747087141406684, lon=113.59423404240931
+  [110] lat=22.74710651978532, lon=113.59423577047248
+  [111] lat=22.747125899002352, lon=113.59423748882907
+  [112] lat=22.74714528613182, lon=113.59423908519616
+  [113] lat=22.747164696389927, lon=113.59424032497868
+  [114] lat=22.74718410664803, lon=113.5942415647612
+  [115] lat=22.747203527632326, lon=113.59424256228709
+  [116] lat=22.747222958151003, lon=113.59424334447372
+  [117] lat=22.74724238866968, lon=113.59424412666037
+  [118] lat=22.747261827806682, lon=113.59424456066232
+  [119] lat=22.74728126904572, lon=113.59424490974116
+  [120] lat=22.74730071048822, lon=113.5942452269695
+  [121] lat=22.747320154321457, lon=113.59424516995423
+  [122] lat=22.747339598154696, lon=113.59424511293896
+  [123] lat=22.74735904055559, lon=113.59424492269507
+  [124] lat=22.747378480330518, lon=113.59424448819867
+  [125] lat=22.747397920105445, lon=113.59424405370227
+  [126] lat=22.747417354063536, lon=113.59424340078472
+  [127] lat=22.74743678456788, lon=113.59424261817958
+  [128] lat=22.747456215072226, lon=113.59424183557445
+  [129] lat=22.747475633719887, lon=113.5942407655045
+[MQTT Nav] parsed OK: source=avoidanceTrajectory, points=130, trigger_ts=1791786036.525 (gnss-latest), first=(0.39697541, 1.98258708) rad
+[MQTT Nav] activated navigation band (avoidanceTrajectory): 130 points, 279.22m
+[ShmVideoSender] 已写 300 帧 (mmap+semaphore)
+  帧   300/0 | avg 40.0ms (25.0fps) | gst解码 25.2ms | ships=0
+[DCPA snap] hit=0 miss=0 ambiguous=0 / 0 次 (base=12.0px @640x360)
+[MQTT Nav] received prediction: shipId=11, positionList=300 pts, avoidanceTrajectory=130 pts, trajectoryLength_m=298.9999831765136, collisionAlert=1, dcpaResults=1, obstacleAlerts=0
+[MQTT Nav] avoidanceTrajectory data (130 pts):
+  [00] lat=22.745056674333334, lon=113.59387328966667
+  [01] lat=22.74507605316918, lon=113.59387156626306
+  [02] lat=22.745095432005026, lon=113.59386984285943
+  [03] lat=22.74511481881136, lon=113.59386824036035
+  [04] lat=22.745134226682552, lon=113.59386695739465
+  [05] lat=22.745153634553745, lon=113.59386567442895
+  [06] lat=22.745173053692174, lon=113.59386463358128
+  [07] lat=22.74519248208583, lon=113.59386379161626
+  [08] lat=22.74521191047949, lon=113.59386294965122
+  [09] lat=22.745231348755972, lon=113.59386247116737
+  [10] lat=22.745250789150205, lon=113.59386207057231
+  [11] lat=22.745270229884973, lon=113.59386171326607
+  [12] lat=22.74528967375263, lon=113.59386175421672
+  [13] lat=22.74530911762029, lon=113.59386179516737
+  [14] lat=22.745328559604623, lon=113.59386200060875
+  [15] lat=22.74534799841703, lon=113.59386248308714
+  [16] lat=22.745367437229444, lon=113.5938629655655
+  [17] lat=22.745386867253693, lon=113.59386373360138
+  [18] lat=22.745406292484397, lon=113.59386465739586
+  [19] lat=22.7454257177151, lon=113.59386558119034
+  [20] lat=22.745445122577106, lon=113.59386691131448
+  [21] lat=22.745464525705607, lon=113.59386827601988
+  [22] lat=22.745483922831557, lon=113.593869727061
+  [23] lat=22.745503295347046, lon=113.59387153207868
+  [24] lat=22.745522667862534, lon=113.59387333709635
+  [25] lat=22.745542021973137, lon=113.59387534894725
+  [26] lat=22.74556135537824, lon=113.59387759348549
+  [27] lat=22.745580688783345, lon=113.59387983802374
+  [28] lat=22.745599986728777, lon=113.59388240931432
+  [29] lat=22.74561927254327, lon=113.5938850923886
+  [30] lat=22.745638557258747, lon=113.59388778403854
+  [31] lat=22.745657787023283, lon=113.59389090447199
+  [32] lat=22.74567701678782, lon=113.59389402490542
+  [33] lat=22.745696227586265, lon=113.59389727357134
+  [34] lat=22.745715392866085, lon=113.59390082999523
+  [35] lat=22.7457345581459, lon=113.59390438641911
+  [36] lat=22.745753681977785, lon=113.5939081898721
+  [37] lat=22.74577277436641, lon=113.59391218072646
+  [38] lat=22.745791866755035, lon=113.59391617158083
+  [39] lat=22.745810890625517, lon=113.59392052724381
+  [40] lat=22.74582990174844, lon=113.59392495077815
+  [41] lat=22.745848902329648, lon=113.59392942498775
+  [42] lat=22.745867823848013, lon=113.59393427926177
+  [43] lat=22.745886745366374, lon=113.5939391335358
+  [44] lat=22.745905628490966, lon=113.59394415589234
+  [45] lat=22.745924452105214, lon=113.5939494387768
+  [46] lat=22.745943275719462, lon=113.59395472166128
+  [47] lat=22.74596202855989, lon=113.59396028874121
+  [48] lat=22.74598074601341, lon=113.59396599791889
+  [49] lat=22.74599946346693, lon=113.59397170709657
+  [50] lat=22.746018073277366, lon=113.59397781513448
+  [51] lat=22.74603667636011, lon=113.59398394810114
+  [52] lat=22.746055253014674, lon=113.59399017189305
+  [53] lat=22.746073733566764, lon=113.59399672595862
+  [54] lat=22.746092214118853, lon=113.59400328002417
+  [55] lat=22.7461106306333, lon=113.59401003910152
+  [56] lat=22.7461289805486, lon=113.59401701139114
+  [57] lat=22.746147330463902, lon=113.59402398368077
+  [58] lat=22.746165574325488, lon=113.59403127345013
+  [59] lat=22.746183785555164, lon=113.59403866090557
+  [60] lat=22.746201991858296, lon=113.59404606225766
+  [61] lat=22.74622007746102, lon=113.59405380407782
+  [62] lat=22.74623816306375, lon=113.59406154589799
+  [63] lat=22.746256214828904, lon=113.59406937867851
+  [64] lat=22.746274192574365, lon=113.59407741043482
+  [65] lat=22.746292170319826, lon=113.59408544219113
+  [66] lat=22.74631009738478, lon=113.59409360518272
+  [67] lat=22.746327988973377, lon=113.59410186003899
+  [68] lat=22.746345880561975, lon=113.59411011489527
+  [69] lat=22.746363719074555, lon=113.59411850351822
+  [70] lat=22.746381549143226, lon=113.59412691342223
+  [71] lat=22.74639937439637, lon=113.5941353352567
+  [72] lat=22.74641716938049, lon=113.59414383208255
+  [73] lat=22.74643496436461, lon=113.5941523289084
+  [74] lat=22.74645275603229, lon=113.59416083388929
+  [75] lat=22.7464705429622, lon=113.59416935052022
+  [76] lat=22.746488329892113, lon=113.59417786715116
+  [77] lat=22.746506129437456, lon=113.59418635270553
+  [78] lat=22.746523934749856, lon=113.59419482405349
+  [79] lat=22.746541740062256, lon=113.59420329540144
+  [80] lat=22.746559586810683, lon=113.59421166357325
+  [81] lat=22.746577435250376, lon=113.59422002753377
+  [82] lat=22.74659529904004, lon=113.59422835252457
+  [83] lat=22.746613212717115, lon=113.5942365508638
+  [84] lat=22.746631126394185, lon=113.59424474920303
+  [85] lat=22.74664908288217, lon=113.59425283580669
+  [86] lat=22.74666708053449, lon=113.59426081497227
+  [87] lat=22.74668507818681, lon=113.59426879413786
+  [88] lat=22.746703153361114, lon=113.59427656363751
+  [89] lat=22.74672124985396, lon=113.59428427547903
+  [90] lat=22.746739352792805, lon=113.59429196911688
+  [91] lat=22.74675755886763, lon=113.59429937149606
+  [92] lat=22.74677576494245, lon=113.59430677387526
+  [93] lat=22.746794009747347, lon=113.59431406121742
+  [94] lat=22.746812332012396, lon=113.5943211184855
+  [95] lat=22.746830654277446, lon=113.59432817575359
+  [96] lat=22.74684904879875, lon=113.59433500571986
+  [97] lat=22.746867489936996, lon=113.5943416890398
+  [98] lat=22.746885931075237, lon=113.59434837235973
+  [99] lat=22.746904476346774, lon=113.59435470642309
+  [100] lat=22.746923035502753, lon=113.59436099391891
+  [101] lat=22.746941612563408, lon=113.59436721697985
+  [102] lat=22.746960285861704, lon=113.59437309370333
+  [103] lat=22.74697895916, lon=113.5943789704268
+  [104] lat=22.746997678979962, lon=113.59438466640137
+  [105] lat=22.74701646012394, lon=113.59439012411602
+  [106] lat=22.74703524126792, lon=113.59439558183065
+  [107] lat=22.74705409282836, lon=113.59440074242447
+  [108] lat=22.747072973728997, lon=113.59440577921794
+  [109] lat=22.74709185462963, lon=113.5944108160114
+  [110] lat=22.747110824245333, lon=113.594415443935
+  [111] lat=22.747129795635335, lon=113.5944200636812
+  [112] lat=22.74714878757223, lon=113.59442457941572
+  [113] lat=22.74716783956927, lon=113.59442879111604
+  [114] lat=22.747186891566304, lon=113.59443300281639
+  [115] lat=22.747205980937764, lon=113.59443700557816
+  [116] lat=22.747225103530926, lon=113.59444082261678
+  [117] lat=22.747244226124092, lon=113.59444463965539
+  [118] lat=22.747263397636925, lon=113.59444815306219
+  [119] lat=22.747282581081386, lon=113.59445159241245
+  [120] lat=22.747301768578417, lon=113.59445500368963
+  [121] lat=22.747321003693166, lon=113.59445808510813
+  [122] lat=22.747340238807915, lon=113.59446116652663
+  [123] lat=22.747359489189904, lon=113.5944641292943
+  [124] lat=22.74737876756183, lon=113.59446687453543
+  [125] lat=22.74739804593376, lon=113.59446961977656
+  [126] lat=22.747417346725626, lon=113.59447216852378
+  [127] lat=22.74743666082933, lon=113.59447460060272
+  [128] lat=22.747455974933033, lon=113.59447703268168
+  [129] lat=22.7474753153225, lon=113.59447920359489
+[MQTT Nav] parsed OK: source=avoidanceTrajectory, points=130, trigger_ts=1791786041.525 (gnss-latest), first=(0.39697613, 1.98258710) rad
+[MQTT Nav] activated navigation band (avoidanceTrajectory): 130 points, 279.22m
+[ShmVideoSender] 已写 400 帧 (mmap+semaphore)
+Fatal Python error: Segmentation fault
+
+Thread 0x0000fffe6e3c8120 (most recent call first):
+  File "/usr/local/lib/python3.10/dist-packages/paho/mqtt/client.py", line 1663 in _loop
+  File "/usr/local/lib/python3.10/dist-packages/paho/mqtt/client.py", line 2297 in loop_forever
+  File "/usr/local/lib/python3.10/dist-packages/paho/mqtt/client.py", line 4523 in _thread_main
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffe6ebd8120 (most recent call first):
+  File "/usr/lib/python3.10/threading.py", line 324 in wait
+  File "/usr/lib/python3.10/threading.py", line 607 in wait
+  File "/home/jetson/code/Visualization/utils/realtime_navigation.py", line 367 in _update_loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffe6f3e8120 (most recent call first):
+  File "/usr/lib/python3.10/threading.py", line 324 in wait
+  File "/usr/lib/python3.10/threading.py", line 607 in wait
+  File "/home/jetson/code/Visualization/infer/async_seg.py", line 127 in _loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffe90fb6120 (most recent call first):
+  File "/usr/lib/python3.10/threading.py", line 324 in wait
+  File "/usr/lib/python3.10/threading.py", line 607 in wait
+  File "/home/jetson/code/Visualization/network/nav_sender.py", line 106 in _run
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffed102f120 (most recent call first):
+  File "/usr/lib/python3/dist-packages/gi/overrides/GLib.py", line 497 in run
+  File "/home/jetson/code/Visualization/network/gst_utils.py", line 408 in _gst_main
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffed1aef120 (most recent call first):
+  File "/home/jetson/code/Visualization/network/yolo_sender.py", line 166 in _send_loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffed22ff120 (most recent call first):
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/nn/backends/tensorrt.py", line 143 in forward
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/nn/autobackend.py", line 273 in forward
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1725 in _call_impl
+  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1714 in _wrapped_call_impl
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/engine/predictor.py", line 182 in inference
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/engine/predictor.py", line 334 in stream_inference
+  File "/usr/local/lib/python3.10/dist-packages/torch/utils/_contextlib.py", line 36 in generator_context
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/engine/predictor.py", line 225 in __call__
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/engine/model.py", line 536 in predict
+  File "/home/jetson/code/Visualization/venv/lib/python3.10/site-packages/ultralytics/engine/model.py", line 177 in __call__
+  File "/home/jetson/code/Visualization/infer/yolo_detector.py", line 142 in _infer_loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffef0a9d120 (most recent call first):
+  File "/usr/lib/python3.10/threading.py", line 324 in wait
+  File "/usr/lib/python3.10/threading.py", line 607 in wait
+  File "/home/jetson/code/Visualization/data_server.py", line 536 in _send_worker
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffef12ad120 (most recent call first):
+  File "/usr/lib/python3.10/threading.py", line 324 in wait
+  File "/usr/lib/python3.10/threading.py", line 607 in wait
+  File "/home/jetson/code/Visualization/data_server.py", line 536 in _send_worker
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffef1abd120 (most recent call first):
+  File "/usr/lib/python3.10/socket.py", line 293 in accept
+  File "/home/jetson/code/Visualization/data_server.py", line 574 in _accept_loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffef22cd120 (most recent call first):
+  File "/usr/lib/python3.10/socket.py", line 293 in accept
+  File "/home/jetson/code/Visualization/data_server.py", line 574 in _accept_loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffef8b0f120 (most recent call first):
+  File "/home/jetson/code/Visualization/network/shm_sync.py", line 222 in wait_for_new_frame
+  File "/home/jetson/code/Visualization/godot_launcher.py", line 120 in _frame_reader_loop
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000fffef82ff120 (most recent call first):
+  File "/usr/lib/python3/dist-packages/gi/overrides/GLib.py", line 497 in run
+  File "/usr/lib/python3.10/threading.py", line 953 in run
+  File "/usr/lib/python3.10/threading.py", line 1016 in _bootstrap_inner
+  File "/usr/lib/python3.10/threading.py", line 973 in _bootstrap
+
+Thread 0x0000ffffa6956860 (most recent call first):
+  File "/usr/lib/python3.10/threading.py", line 324 in wait
+  File "/usr/lib/python3.10/threading.py", line 355 in wait_for
+  File "/home/jetson/code/Visualization/network/gst_utils.py", line 431 in read
+  File "/home/jetson/code/Visualization/video_pipeline.py", line 389 in process_video
+  File "/home/jetson/code/Visualization/main.py", line 275 in main
+  File "/home/jetson/code/Visualization/main.py", line 331 in <module>
+
+Extension modules: numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, PIL._imaging, yaml._yaml, PIL._imagingft, google._upb._message, gi._gi, cairo._cairo, gi._gi_cairo, gi.overrides._gi_gst (total: 28)

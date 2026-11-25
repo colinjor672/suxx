@@ -1,20 +1,13 @@
 import time
 import threading
 
-import numpy as np
-
 from data_server import prepare_frame_data
-from utils.geometry import extract_polygons_json, scale_ships_for_send
+from utils.geometry import scale_ships_for_send
 from utils.thread_utils import set_thread_name
 class AsyncNavDataSender:
-    def __init__(self, nav_server, mask_send_scale: float = 0.5,
-             use_polygon_encoding: bool = True,
-             polygon_epsilon: float = 0.0015):
+    def __init__(self, nav_server, mask_send_scale: float = 0.5):
         self.nav_server      = nav_server
         self.mask_send_scale = float(max(0.25, min(1.0, mask_send_scale)))
-        self.use_polygon_encoding = use_polygon_encoding
-        self.polygon_epsilon      = polygon_epsilon
-        self._poly_bytes_last     = 0
         self._lock   = threading.Lock()
         self._slot   = None
         self._event  = threading.Event()
@@ -53,7 +46,7 @@ class AsyncNavDataSender:
         return None
 
     def submit(self, width, height, curve, frame_id, timestamp,
-        water_mask, bridge_mask, ships_data,
+        ships_data,
         ship_src_w=None, ship_src_h=None,
         video_time: float = 0.0,
         sync_mode: str = "file_time",
@@ -70,8 +63,6 @@ class AsyncNavDataSender:
             width, height,
             curve.copy() if (curve is not None and len(curve) > 0) else curve,
             frame_id, timestamp,
-            water_mask,
-            bridge_mask,
             list(ships_data) if ships_data else [],
             ship_src_w,
             ship_src_h,
@@ -96,9 +87,6 @@ class AsyncNavDataSender:
             print("[AsyncNavSender] ⚠️ 后台线程未在超时内退出")
         else:
             print(f"[AsyncNavSender] ✓ 已停止 | 发送={self.sent} 丢弃={self.dropped}")
-        if self.use_polygon_encoding and self._poly_bytes_last > 0:
-            ratio = 460800 // max(1, self._poly_bytes_last)
-            print(f"  多边形末帧大小: {self._poly_bytes_last}B  压缩率≈{ratio}x")
     
     def _run(self):
         set_thread_name("NavSender")
@@ -117,17 +105,13 @@ class AsyncNavDataSender:
             (
                 width, height,
                 curve, frame_id, timestamp,
-                water_mask, bridge_mask, ships_data,
+                ships_data,
                 ship_src_w, ship_src_h,
                 video_time, sync_mode, source_fps,
                 mask_frame_id, mask_video_time,
                 bridge_warning,
             ) = item
 
-            # ★ mask 已在 AsyncSeg 中 resize 到 send 尺寸，直接使用，无需 cuda_resize
-            # ★ 下游 extract_polygons_json 不修改原数组，无需 .copy()
-            wm = water_mask
-            bm = bridge_mask
             send_w, send_h = width, height
             if ships_data:
                 sx_ship = send_w / float(ship_src_w)
@@ -147,58 +131,31 @@ class AsyncNavDataSender:
                     self.dropped += 1
                     continue
 
-                if self.use_polygon_encoding:
-                    w_polys, b_polys = extract_polygons_json(
-                        wm, bm,
-                        epsilon_ratio = self.polygon_epsilon,
-                        min_area_px   = max(100, int(send_w * send_h * 0.001)),
-                    )
+                msg = prepare_frame_data(
+                    width       = send_w,
+                    height      = send_h,
+                    curve       = curve,
+                    frame_id    = frame_id,
+                    timestamp   = timestamp,
+                    water_mask  = [],
+                    bridge_mask = [],
+                    ships_data  = ships_data,
+                )
+                msg["source_type"] = "file"
+                msg["sync_mode"] = sync_mode
 
-                    self._poly_bytes_last = (
-                        sum(len(p) for p in w_polys) +
-                        sum(len(p) for p in b_polys)
-                    ) * 12
+                # Godot 使用该字段把整包数据对齐到对应的视频帧。
+                msg["video_time"] = float(mask_video_time)
 
-                    empty = np.zeros((1, 1), dtype=np.uint8)
-                    msg = prepare_frame_data(
-                        width       = send_w,
-                        height      = send_h,
-                        curve       = curve,
-                        frame_id    = frame_id,
-                        timestamp   = timestamp,
-                        water_mask  = empty,
-                        bridge_mask = empty,
-                        ships_data  = ships_data,
-                    )
-                    msg["source_type"] = "file"
-                    msg["sync_mode"] = sync_mode
+                msg["send_video_time"] = float(video_time)
+                msg["source_fps"] = float(source_fps)
 
-                    # Godot 使用该字段把整包数据对齐到对应的视频帧。
-                    msg["video_time"] = float(mask_video_time)
+                msg["mask_frame_id"] = int(mask_frame_id)
+                msg["mask_video_time"] = float(mask_video_time)
 
-                    msg["send_video_time"] = float(video_time)
-                    msg["source_fps"] = float(source_fps)
-
-                    msg["mask_frame_id"] = int(mask_frame_id)
-                    msg["mask_video_time"] = float(mask_video_time)
-
-                    msg["send_frame_id"] = int(frame_id)
-                    msg["sent_wall_time"] = time.time()
-                    msg['water_polygons']  = w_polys
-                    msg['bridge_polygons'] = b_polys
-                    msg['has_polygons']    = True
-
-                else:
-                    msg = prepare_frame_data(
-                        width       = send_w,
-                        height      = send_h,
-                        curve       = curve,
-                        frame_id    = frame_id,
-                        timestamp   = timestamp,
-                        water_mask  = wm,
-                        bridge_mask = bm,
-                        ships_data  = ships_data,
-                    )
+                msg["send_frame_id"] = int(frame_id)
+                msg["sent_wall_time"] = time.time()
+                msg["has_polygons"] = False
 
                 # 桥梁警戒（警戒线/信息面板像素坐标）：无目标桥时省略该字段
                 if bridge_warning:
